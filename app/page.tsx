@@ -16,6 +16,25 @@ type Indicator = {
   assessor: string;
 };
 
+type Category = { name: string; desc: string; progress: number; score: number; weight: number };
+
+const initialCategories: Category[] = [
+  { name: "Aspek 1", desc: "Kebijakan Internal Tata Kelola", progress: 92, score: 4.12, weight: 0.2 },
+  { name: "Aspek 2", desc: "Tata Kelola Pemerintah Digital", progress: 78, score: 3.84, weight: 0.3 },
+  { name: "Aspek 3", desc: "Manajemen Pemerintah Digital", progress: 64, score: 3.21, weight: 0.2 },
+  { name: "Aspek 4", desc: "Layanan Pemerintah Digital", progress: 88, score: 4.02, weight: 0.3 },
+];
+
+const subcategories = [
+  { code: "1.1", name: "Kebijakan Internal Tata Kelola SPBE", category: "Aspek 1", score: 4.28, target: 4.5, indicators: 4 },
+  { code: "1.2", name: "Kebijakan Internal Manajemen SPBE", category: "Aspek 1", score: 3.96, target: 4.2, indicators: 6 },
+  { code: "2.1", name: "Perencanaan Strategis SPBE", category: "Aspek 2", score: 4.10, target: 4.5, indicators: 4 },
+  { code: "2.2", name: "Teknologi Informasi dan Komunikasi", category: "Aspek 2", score: 3.58, target: 4.0, indicators: 5 },
+  { code: "3.1", name: "Penerapan Manajemen SPBE", category: "Aspek 3", score: 3.21, target: 4.0, indicators: 8 },
+  { code: "4.1", name: "Layanan Administrasi Pemerintahan", category: "Aspek 4", score: 4.18, target: 4.5, indicators: 7 },
+  { code: "4.2", name: "Layanan Publik Berbasis Elektronik", category: "Aspek 4", score: 3.86, target: 4.2, indicators: 6 },
+];
+
 const initialIndicators: Indicator[] = [
   { id: "1", code: "1.1.1", name: "Arsitektur SPBE Instansi Pusat/Pemerintah Daerah", category: "Aspek 1", subcategory: "Tata Kelola Pemerintah Digital", score: 4, label: "Sangat Baik", target: 5, evidence: [{ name: "Perbup-Arsitektur-SPBE-2025.pdf", size: "2,4 MB" }], assessor: "Rina Kusuma" },
   { id: "2", code: "1.1.2", name: "Peta Rencana SPBE Instansi", category: "Aspek 1", subcategory: "Tata Kelola Pemerintah Digital", score: 3, label: "Baik", target: 4, evidence: [{ name: "Peta-Rencana-SPBE.xlsx", size: "840 KB" }, { name: "Notulen-Evaluasi.pdf", size: "1,1 MB" }], assessor: "Budi Santoso" },
@@ -30,6 +49,7 @@ export default function Home() {
   const [year, setYear] = useState("2025");
   const [assessment, setAssessment] = useState("SPBE");
   const [indicators, setIndicators] = useState(initialIndicators);
+  const [categories, setCategories] = useState(initialCategories);
   const [selectedId, setSelectedId] = useState("3");
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
@@ -38,6 +58,13 @@ export default function Home() {
   const selected = indicators.find((item) => item.id === selectedId) ?? indicators[0];
   const filtered = useMemo(() => indicators.filter((item) => `${item.code} ${item.name} ${item.subcategory}`.toLowerCase().includes(query.toLowerCase())), [indicators, query]);
   const progress = Math.round((indicators.filter((item) => item.score > 0).length / indicators.length) * 100);
+  const totalWeight = categories.reduce((sum, category) => sum + category.weight, 0);
+  const finalScore = categories.reduce((sum, category) => sum + category.score * category.weight, 0);
+
+  const updateWeight = (index: number, value: number) => {
+    const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+    setCategories((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weight: normalized } : item));
+  };
 
   const flash = (message: string) => {
     setToast(message);
@@ -84,7 +111,7 @@ export default function Home() {
           <div className="filterbar">
             <label>Tahun Penilaian<select value={year} onChange={(e) => setYear(e.target.value)}><option>2025</option><option>2024</option><option>2023</option></select></label>
             <label>Jenis Penilaian<select value={assessment} onChange={(e) => setAssessment(e.target.value)}><option>SPBE</option><option>Indeks SDI</option><option>EPSS</option><option>ITKP</option></select></label>
-            <div className="final-score"><span>Nilai Akhir {assessment}</span><strong>3,72</strong><b className="badge green">Sangat Baik</b></div>
+            <div className="final-score"><span>Nilai Akhir {assessment}</span><strong>{finalScore.toFixed(2).replace(".", ",")}</strong><b className="badge green">Sangat Baik</b></div>
           </div>
 
           <div className="metrics">
@@ -99,7 +126,9 @@ export default function Home() {
               <div className="panel-head"><div><h2>Progres Penilaian {assessment}</h2><p>Per kategori utama · Tahun {year}</p></div><button>⋮</button></div>
               <div className="overall"><div className="ring" style={{ "--progress": `${progress}%` } as React.CSSProperties}><span>{progress}%</span></div><div><strong>{assessment} {year}</strong><p>38 dari 47 indikator selesai dinilai</p></div><b className="badge green">Berjalan</b></div>
               <div className="category-list">
-                {[{ name: "Aspek 1", desc: "Kebijakan Internal Tata Kelola", val: 92, score: "4,12" }, { name: "Aspek 2", desc: "Tata Kelola Pemerintah Digital", val: 78, score: "3,84" }, { name: "Aspek 3", desc: "Manajemen Pemerintah Digital", val: 64, score: "3,21" }, { name: "Aspek 4", desc: "Layanan Pemerintah Digital", val: 88, score: "4,02" }].map((cat, i) => <div className="category-row" key={cat.name}><span className={`cat-num c${i + 1}`}>{i + 1}</span><div className="cat-body"><div><strong>{cat.name}</strong><small>{cat.desc}</small></div><div className="progress-track"><i style={{ width: `${cat.val}%` }} /></div></div><div className="cat-score"><strong>{cat.score}</strong><small>{cat.val}% selesai</small></div></div>)}
+                <div className="weight-header"><span>Kategori & progres</span><span>Bobot</span><span>Nilai</span><span>Kontribusi</span></div>
+                {categories.map((cat, i) => <div className="category-row weighted" key={cat.name}><span className={`cat-num c${i + 1}`}>{i + 1}</span><div className="cat-body"><div><strong>{cat.name}</strong><small>{cat.desc}</small></div><div className="progress-track"><i style={{ width: `${cat.progress}%` }} /></div></div><label className="weight-input" aria-label={`Bobot ${cat.name}`}><input type="number" min="0" max="1" step="0.05" value={cat.weight} onChange={(event) => updateWeight(i, Number(event.target.value))} /><small>{Math.round(cat.weight * 100)}%</small></label><div className="cat-score"><strong>{cat.score.toFixed(2).replace(".", ",")}</strong><small>{cat.progress}% selesai</small></div><div className="contribution"><strong>{(cat.score * cat.weight).toFixed(3).replace(".", ",")}</strong><small>{cat.score.toFixed(2).replace(".", ",")} × {cat.weight.toFixed(2).replace(".", ",")}</small></div></div>)}
+                <div className={`weight-total ${Math.abs(totalWeight - 1) < 0.001 ? "valid" : "invalid"}`}><span>Total bobot</span><strong>{totalWeight.toFixed(2).replace(".", ",")} <small>({Math.round(totalWeight * 100)}%)</small></strong><span>{Math.abs(totalWeight - 1) < 0.001 ? "✓ Bobot sudah sesuai" : "! Total bobot harus 1,00"}</span></div>
               </div>
               <button className="text-button" onClick={() => setActive("Penilaian")}>Lihat seluruh penilaian <span>→</span></button>
             </section>
@@ -112,6 +141,14 @@ export default function Home() {
               <button className="text-button">Lihat semua aktivitas <span>→</span></button>
             </section>
           </div>
+
+          <section className="panel subcategory-panel">
+            <div className="panel-head"><div><h2>Nilai Subkategori</h2><p>Nilai merupakan rata-rata indikator di dalam subkategori dan menopang nilai kategori utama.</p></div><span className="formula-pill">Nilai kategori = Σ nilai subkategori</span></div>
+            <div className="subcategory-grid">{subcategories.map((sub) => {
+              const percent = Math.min(100, (sub.score / 5) * 100);
+              return <article key={sub.code} className="subcategory-card"><div className="subcategory-top"><span className="code">{sub.code}</span><span>{sub.category}</span></div><h3>{sub.name}</h3><div className="subcategory-score"><strong>{sub.score.toFixed(2).replace(".", ",")}</strong><span>/ 5,00</span><b className={`trend ${sub.score >= sub.target ? "met" : "gap"}`}>{sub.score >= sub.target ? "Target tercapai" : `Selisih ${(sub.target - sub.score).toFixed(2).replace(".", ",")}`}</b></div><div className="score-bar"><i style={{ width: `${percent}%` }} /></div><footer><span>{sub.indicators} indikator</span><span>Target <strong>{sub.target.toFixed(2).replace(".", ",")}</strong></span></footer></article>;
+            })}</div>
+          </section>
 
           <section className="panel indicators-panel">
             <div className="panel-head indicators-head"><div><h2>Indikator yang Perlu Ditindaklanjuti</h2><p>Prioritaskan indikator dengan selisih nilai terbesar atau bukti belum lengkap.</p></div><label className="search">⌕<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari indikator..." /></label></div>
