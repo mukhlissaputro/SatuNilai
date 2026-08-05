@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Evidence = { name: string; size: string };
 type Indicator = {
@@ -53,6 +53,8 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState("3");
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
+  const [sessionUser, setSessionUser] = useState<{ displayName: string; role: string } | null>(null);
+  const [backendReady, setBackendReady] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = indicators.find((item) => item.id === selectedId) ?? indicators[0];
@@ -65,6 +67,24 @@ export default function Home() {
     const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
     setCategories((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weight: normalized } : item));
   };
+
+  useEffect(() => {
+    let active = true;
+    async function connect() {
+      try {
+        await fetch("/api/bootstrap", { method: "POST", headers: { "Content-Type": "application/json" } });
+        const response = await fetch("/api/me", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json() as { user: { displayName: string; role: string } };
+        if (active) { setSessionUser(data.user); setBackendReady(true); }
+      } catch { /* dashboard remains available while backend reconnects */ }
+    }
+    void connect();
+    return () => { active = false; };
+  }, []);
+
+  const displayName = sessionUser?.displayName?.split("@")[0] ?? "Ahmad Rasyid";
+  const displayRole = sessionUser?.role === "admin" ? "Administrator" : sessionUser?.role === "head" ? "Kepala Unit" : "Staf";
 
   const flash = (message: string) => {
     setToast(message);
@@ -96,17 +116,17 @@ export default function Home() {
           {["Tahun Penilaian", "Jenis Penilaian", "Struktur Indikator", "Pengguna & Akses"].map((item) => <button key={item} onClick={() => { setActive(item); flash(`${item} siap dikelola`); }}><span>{item === "Pengguna & Akses" ? "♙" : "◇"}</span>{item}</button>)}
         </nav>
         <div className="sidebar-help"><span>?</span><div><strong>Butuh bantuan?</strong><small>Lihat panduan penggunaan</small></div></div>
-        <div className="user-card"><div className="avatar">AR</div><div><strong>Ahmad Rasyid</strong><small>Administrator</small></div><button aria-label="Menu pengguna">•••</button></div>
+        <div className="user-card"><div className="avatar">{displayName.slice(0, 2).toUpperCase()}</div><div><strong>{displayName}</strong><small>{displayRole}</small></div><button aria-label="Menu pengguna">•••</button></div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark">S</span><strong>SatuNilai</strong></div>
-          <div className="top-actions"><button className="icon-btn" aria-label="Notifikasi">♢<i /></button><div className="header-user"><div className="avatar">AR</div><span><strong>Ahmad Rasyid</strong><small>Administrator</small></span></div></div>
+          <div className="top-actions"><span className={`secure-state ${backendReady ? "ready" : "connecting"}`}><i />{backendReady ? "Penyimpanan privat aktif" : "Menghubungkan penyimpanan"}</span><button className="icon-btn" aria-label="Notifikasi">♢<i /></button><div className="header-user"><div className="avatar">{displayName.slice(0, 2).toUpperCase()}</div><span><strong>{displayName}</strong><small>{displayRole}</small></span></div></div>
         </header>
 
         <div className="content">
-          <div className="page-heading"><div><p className="eyebrow">RINGKASAN PENILAIAN</p><h1>Selamat pagi, Ahmad <span>👋</span></h1><p>Pantau progres dan kelengkapan dokumen penilaian instansi Anda.</p></div><button className="primary" onClick={() => flash("Form penilaian baru dibuka")}>＋ Mulai Penilaian Baru</button></div>
+          <div className="page-heading"><div><p className="eyebrow">RINGKASAN PENILAIAN</p><h1>Selamat pagi, {displayName.split(" ")[0]} <span>👋</span></h1><p>Pantau progres dan kelengkapan dokumen penilaian instansi Anda.</p></div><button className="primary" onClick={() => flash("Form penilaian baru dibuka")}>＋ Mulai Penilaian Baru</button></div>
 
           <div className="filterbar">
             <label>Tahun Penilaian<select value={year} onChange={(e) => setYear(e.target.value)}><option>2025</option><option>2024</option><option>2023</option></select></label>
