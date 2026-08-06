@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type Evidence = { name: string; size: string };
 type Indicator = {
   id: string;
+  scoreId?: string;
   code: string;
   name: string;
   category: string;
@@ -16,13 +17,13 @@ type Indicator = {
   assessor: string;
 };
 
-type Category = { name: string; desc: string; progress: number; score: number; weight: number };
+type Category = { id: string; name: string; desc: string; progress: number; score: number; weight: number };
 
 const initialCategories: Category[] = [
-  { name: "Aspek 1", desc: "Kebijakan Internal Tata Kelola", progress: 92, score: 4.12, weight: 0.2 },
-  { name: "Aspek 2", desc: "Tata Kelola Pemerintah Digital", progress: 78, score: 3.84, weight: 0.3 },
-  { name: "Aspek 3", desc: "Manajemen Pemerintah Digital", progress: 64, score: 3.21, weight: 0.2 },
-  { name: "Aspek 4", desc: "Layanan Pemerintah Digital", progress: 88, score: 4.02, weight: 0.3 },
+  { id: "cat-1", name: "Aspek 1", desc: "Kebijakan Internal Tata Kelola", progress: 92, score: 4.12, weight: 0.2 },
+  { id: "cat-2", name: "Aspek 2", desc: "Tata Kelola Pemerintah Digital", progress: 78, score: 3.84, weight: 0.3 },
+  { id: "cat-3", name: "Aspek 3", desc: "Manajemen Pemerintah Digital", progress: 64, score: 3.21, weight: 0.2 },
+  { id: "cat-4", name: "Aspek 4", desc: "Layanan Pemerintah Digital", progress: 88, score: 4.02, weight: 0.3 },
 ];
 
 const subcategories = [
@@ -66,6 +67,8 @@ export default function Home() {
   const updateWeight = (index: number, value: number) => {
     const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
     setCategories((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weight: normalized } : item));
+    const category = categories[index];
+    if (backendReady && category) void fetch("/api/dashboard", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "weight", id: category.id, value: normalized * 100 }) }).then((response) => { if (!response.ok) throw new Error(); }).then(() => flash("Bobot tersimpan permanen")).catch(() => flash("Bobot belum dapat disimpan"));
   };
 
   useEffect(() => {
@@ -77,6 +80,15 @@ export default function Home() {
         if (!response.ok) return;
         const data = await response.json() as { user: { displayName: string; role: string } };
         if (active) { setSessionUser(data.user); setBackendReady(true); }
+        const dashboardResponse = await fetch("/api/dashboard", { cache: "no-store" });
+        if (dashboardResponse.ok && active) {
+          const dashboard = await dashboardResponse.json() as { categories: Array<{ id: string; code: string; name: string; weight: number; score: number; total: number; completed: number }>; indicators: Array<{ id: string; score_id: string; code: string; name: string; category: string; subcategory: string; score: number | null; target: number | null; evidence_count: number; assessor_name: string | null }> };
+          if (dashboard.categories.length) setCategories(dashboard.categories.map((item) => ({ id: item.id, name: `Aspek ${item.code}`, desc: item.name, weight: Number(item.weight) / 100, score: Number(item.score), progress: item.total ? Math.round((Number(item.completed) / Number(item.total)) * 100) : 0 })));
+          if (dashboard.indicators.length) {
+            setIndicators(dashboard.indicators.map((item) => ({ id: item.id, scoreId: item.score_id, code: item.code, name: item.name, category: item.category, subcategory: item.subcategory, score: Number(item.score ?? 0), label: scoreLabels[Number(item.score ?? 0)] ?? "Belum Dinilai", target: Number(item.target ?? 0), evidence: Array.from({ length: Number(item.evidence_count) }, (_, index) => ({ name: `Bukti dukung ${index + 1}`, size: "Tersimpan privat" })), assessor: item.assessor_name ?? "Belum direview" })));
+            setSelectedId(dashboard.indicators[0].id);
+          }
+        }
       } catch { /* dashboard remains available while backend reconnects */ }
     }
     void connect();
@@ -94,13 +106,29 @@ export default function Home() {
   const setScore = (score: number) => {
     setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, score, label: scoreLabels[score] } : item));
     flash("Nilai indikator berhasil diperbarui");
+    if (backendReady && selected.scoreId) void fetch("/api/dashboard", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "score", id: selected.scoreId, value: score }) }).then((response) => { if (!response.ok) throw new Error(); }).then(() => flash("Nilai tersimpan permanen")).catch(() => flash("Nilai belum dapat disimpan"));
   };
 
-  const upload = (files: FileList | null) => {
+  const upload = async (files: FileList | null) => {
     if (!files?.length) return;
     const additions = Array.from(files).map((file) => ({ name: file.name, size: file.size > 1_000_000 ? `${(file.size / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1000))} KB` }));
-    setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, evidence: [...item.evidence, ...additions] } : item));
-    flash(`${additions.length} bukti dukung berhasil ditambahkan`);
+    if (backendReady && selected.scoreId) {
+      let uploaded = 0;
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set("scoreId", selected.scoreId);
+        form.set("title", file.name.replace(/\.[^.]+$/, ""));
+        form.set("file", file);
+        const response = await fetch("/api/evidence", { method: "POST", body: form });
+        if (response.ok) uploaded += 1;
+      }
+      if (!uploaded) { flash("Bukti ditolak atau belum dapat disimpan"); return; }
+      setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, evidence: [...item.evidence, ...additions.slice(0, uploaded)] } : item));
+      flash(`${uploaded} bukti tersimpan secara privat`);
+    } else {
+      setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, evidence: [...item.evidence, ...additions] } : item));
+      flash(`${additions.length} bukti ditambahkan sementara`);
+    }
   };
 
   const scoreColor = (score: number) => score >= 5 ? "blue" : score >= 4 ? "green" : score >= 3 ? "amber" : "red";
@@ -179,7 +207,7 @@ export default function Home() {
             <div className="editor-title"><div><span className="code">{selected.code}</span><div><h2>{selected.name}</h2><p>{selected.category} / {selected.subcategory}</p></div></div><button onClick={() => flash("Perubahan disimpan sebagai draf")}>Simpan Draf</button></div>
             <div className="editor-grid">
               <div><label className="field-label">Nilai Kematangan</label><div className="score-choices">{[1, 2, 3, 4, 5].map((score) => <button key={score} className={selected.score === score ? "chosen" : ""} onClick={() => setScore(score)}><strong>{score}</strong><span>{scoreLabels[score]}</span></button>)}</div><div className="target-note"><span>◎</span><p><strong>Target penilaian: Level {selected.target} — {scoreLabels[selected.target]}</strong><br />Pastikan dokumen membuktikan pemenuhan seluruh kriteria pada level target.</p></div></div>
-              <div><label className="field-label">Bukti Dukung <span>({selected.evidence.length})</span></label><input ref={fileRef} type="file" hidden multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.png" onChange={(e) => upload(e.target.files)} /><button className="upload-box" onClick={() => fileRef.current?.click()}><span>⇧</span><strong>Unggah bukti pendukung</strong><small>PDF, Word, Excel, JPG · Maks. 10 MB</small></button>{selected.evidence.map((file, i) => <div className="file-row" key={`${file.name}-${i}`}><span>▤</span><div><strong>{file.name}</strong><small>{file.size}</small></div><button aria-label="Hapus file" onClick={() => setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, evidence: item.evidence.filter((_, index) => index !== i) } : item))}>×</button></div>)}</div>
+              <div><label className="field-label">Bukti Dukung <span>({selected.evidence.length})</span></label><input ref={fileRef} type="file" hidden multiple accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png" onChange={(e) => void upload(e.target.files)} /><button className="upload-box" onClick={() => fileRef.current?.click()}><span>⇧</span><strong>Unggah bukti pendukung</strong><small>PDF, Word, Excel, JPG · Maks. 10 MB</small></button>{selected.evidence.map((file, i) => <div className="file-row" key={`${file.name}-${i}`}><span>▤</span><div><strong>{file.name}</strong><small>{file.size}</small></div><button aria-label="Hapus file" onClick={() => setIndicators((items) => items.map((item) => item.id === selected.id ? { ...item, evidence: item.evidence.filter((_, index) => index !== i) } : item))}>×</button></div>)}</div>
             </div>
           </section>
         </div>
