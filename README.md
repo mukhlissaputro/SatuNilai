@@ -1,14 +1,18 @@
-# vinext-starter
+# SatuNilai
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Aplikasi manajemen penilaian SPBE, Indeks SDI, EPSS, ITKP, dan instrumen pemerintahan lainnya. SatuNilai menyediakan instrumen berversi, dukungan multiunit, RBAC, nilai target/internal/asesor, penyimpanan bukti privat, audit log, dan pelaporan.
+
+## Dokumentasi
+
+- [Buku panduan](docs/BUKU-PANDUAN.md)
+- [Skema database](database.sql)
+- [Migrasi database](drizzle/)
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
 
-## Quick Start
+## Menjalankan aplikasi
 
 ```bash
 npm install
