@@ -21,8 +21,28 @@ export const users = sqliteTable("users", {
   role: text("role", { enum: ["admin", "staff", "head"] }).notNull().default("staff"),
   unitId: text("unit_id").references(() => units.id),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  passwordHash: text("password_hash"),
+  passwordSalt: text("password_salt"),
+  passwordChangedAt: text("password_changed_at"),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_users_email").on(table.email), index("idx_users_unit_id").on(table.unitId)]);
+
+export const authSessions = sqliteTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_auth_sessions_token").on(table.tokenHash), index("idx_auth_sessions_user").on(table.userId)]);
+
+export const passwordResetTokens = sqliteTable("password_reset_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_password_reset_token").on(table.tokenHash), index("idx_password_reset_user").on(table.userId)]);
 
 export const assessmentTypes = sqliteTable("assessment_types", {
   id: text("id").primaryKey(),
@@ -32,6 +52,12 @@ export const assessmentTypes = sqliteTable("assessment_types", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_assessment_types_code").on(table.code)]);
+
+export const userAssessmentTypes = sqliteTable("user_assessment_types", {
+  userId: text("user_id").notNull().references(() => users.id),
+  assessmentTypeId: text("assessment_type_id").notNull().references(() => assessmentTypes.id),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_user_assessment_types_unique").on(table.userId, table.assessmentTypeId), index("idx_user_assessment_types_type").on(table.assessmentTypeId)]);
 
 export const instrumentVersions = sqliteTable("instrument_versions", {
   id: text("id").primaryKey(),
@@ -49,6 +75,7 @@ export const categories = sqliteTable("categories", {
   code: text("code").notNull(),
   name: text("name").notNull(),
   weightPercent: real("weight_percent"),
+  targetValue: real("target_value"),
   sortOrder: integer("sort_order").notNull().default(0),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_categories_version_code").on(table.instrumentVersionId, table.code), index("idx_categories_version").on(table.instrumentVersionId)]);
@@ -59,6 +86,8 @@ export const subcategories = sqliteTable("subcategories", {
   code: text("code").notNull(),
   name: text("name").notNull(),
   weightPercent: real("weight_percent"),
+  targetValue: real("target_value"),
+  finalValue: real("final_value"),
   sortOrder: integer("sort_order").notNull().default(0),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_subcategories_category_code").on(table.categoryId, table.code), index("idx_subcategories_category").on(table.categoryId)]);
@@ -70,6 +99,7 @@ export const indicators = sqliteTable("indicators", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   weightPercent: real("weight_percent"),
+  targetValue: real("target_value"),
   sortOrder: integer("sort_order").notNull().default(0),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_indicators_subcategory_code").on(table.subcategoryId, table.code), index("idx_indicators_subcategory").on(table.subcategoryId)]);
@@ -89,6 +119,7 @@ export const assessmentPeriods = sqliteTable("assessment_periods", {
   instrumentVersionId: text("instrument_version_id").notNull().references(() => instrumentVersions.id),
   year: integer("year").notNull(),
   name: text("name").notNull(),
+  maxScore: real("max_score").notNull().default(5),
   startsAt: text("starts_at").notNull(),
   dueAt: text("due_at").notNull(),
   status: text("status", { enum: ["draft", "open", "review", "finalized"] }).notNull().default("draft"),
@@ -131,6 +162,7 @@ export const evidence = sqliteTable("evidence", {
   sourceType: text("source_type", { enum: ["file", "link"] }).notNull(),
   currentVersionId: text("current_version_id"),
   status: text("status", { enum: ["active", "superseded", "deleted"] }).notNull().default("active"),
+  rejectedAt: text("rejected_at"),
   createdBy: text("created_by").notNull().references(() => users.id),
   ...timestamps,
 }, (table) => [index("idx_evidence_unit_status").on(table.unitId, table.status)]);
@@ -156,6 +188,13 @@ export const evidenceLinks = sqliteTable("evidence_links", {
   scoreId: text("score_id").notNull().references(() => indicatorScores.id),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("idx_evidence_links_evidence_score").on(table.evidenceId, table.scoreId), index("idx_evidence_links_score").on(table.scoreId)]);
+
+export const notificationReads = sqliteTable("notification_reads", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  notificationKey: text("notification_key").notNull(),
+  readAt: text("read_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_notification_reads_user_key").on(table.userId, table.notificationKey), index("idx_notification_reads_user").on(table.userId)]);
 
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(),
