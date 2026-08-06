@@ -1,0 +1,11 @@
+.dev-accounts{display:flex;flex-direction:column;gap:7px;border:1px solid #e3dffa;border-radius:11px;background:#faf9ff;padding:10px}
+.dev-accounts>header{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 5px}
+.dev-accounts>header strong{font-size:10px;color:#4f3db4}
+.dev-accounts>header small{font-size:8px;color:#8b94a5}
+.dev-accounts>button{width:100%;border:1px solid #ebe8f8;border-radius:9px;background:#fff;padding:9px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer}
+.dev-accounts>button:hover{border-color:#cfc6fa;background:#f7f5ff}
+.dev-accounts>button>span{width:30px;height:30px;flex:0 0 30px;border-radius:8px;background:#ece8ff;color:#604bd2;display:grid;place-items:center;font-size:9px;font-weight:800}
+.dev-accounts>button>div{display:flex;min-width:0;flex-direction:column;gap:2px}
+.dev-accounts button strong{font-size:9px;color:#2d3649}
+.dev-accounts code{font-family:inherit;font-size:8px;color:#6553bd}
+.dev-accounts button small{font-size:7px;color:#8a94a6;white-space:normal}

@@ -4,6 +4,7 @@ CREATE TABLE `assessment_periods` (
 	`instrument_version_id` text NOT NULL,
 	`year` integer NOT NULL,
 	`name` text NOT NULL,
+	`max_score` real DEFAULT 5 NOT NULL,
 	`starts_at` text NOT NULL,
 	`due_at` text NOT NULL,
 	`status` text DEFAULT 'draft' NOT NULL,
@@ -29,6 +30,16 @@ CREATE TABLE `assessment_types` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_assessment_types_code` ON `assessment_types` (`code`);--> statement-breakpoint
+CREATE TABLE `user_assessment_types` (
+	`user_id` text NOT NULL,
+	`assessment_type_id` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`assessment_type_id`) REFERENCES `assessment_types`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_user_assessment_types_unique` ON `user_assessment_types` (`user_id`,`assessment_type_id`);--> statement-breakpoint
+CREATE INDEX `idx_user_assessment_types_type` ON `user_assessment_types` (`assessment_type_id`);--> statement-breakpoint
 CREATE TABLE `assignments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`period_id` text NOT NULL,
@@ -64,6 +75,7 @@ CREATE TABLE `categories` (
 	`code` text NOT NULL,
 	`name` text NOT NULL,
 	`weight_percent` real,
+	`target_value` real,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -79,6 +91,7 @@ CREATE TABLE `evidence` (
 	`source_type` text NOT NULL,
 	`current_version_id` text,
 	`status` text DEFAULT 'active' NOT NULL,
+	`rejected_at` text,
 	`created_by` text NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -150,6 +163,7 @@ CREATE TABLE `indicators` (
 	`name` text NOT NULL,
 	`description` text DEFAULT '' NOT NULL,
 	`weight_percent` real,
+	`target_value` real,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -188,6 +202,8 @@ CREATE TABLE `subcategories` (
 	`code` text NOT NULL,
 	`name` text NOT NULL,
 	`weight_percent` real,
+	`target_value` real,
+	`final_value` real,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -213,6 +229,9 @@ CREATE TABLE `users` (
 	`role` text DEFAULT 'staff' NOT NULL,
 	`unit_id` text,
 	`active` integer DEFAULT true NOT NULL,
+	`password_hash` text,
+	`password_salt` text,
+	`password_changed_at` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`unit_id`) REFERENCES `units`(`id`) ON UPDATE no action ON DELETE no action
@@ -220,3 +239,39 @@ CREATE TABLE `users` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_users_email` ON `users` (`email`);--> statement-breakpoint
 CREATE INDEX `idx_users_unit_id` ON `users` (`unit_id`);
+--> statement-breakpoint
+CREATE TABLE `auth_sessions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_auth_sessions_token` ON `auth_sessions` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `idx_auth_sessions_user` ON `auth_sessions` (`user_id`);--> statement-breakpoint
+CREATE TABLE `password_reset_tokens` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`used_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_password_reset_token` ON `password_reset_tokens` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `idx_password_reset_user` ON `password_reset_tokens` (`user_id`);
+--> statement-breakpoint
+CREATE TABLE `notification_reads` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`notification_key` text NOT NULL,
+	`read_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_notification_reads_user_key` ON `notification_reads` (`user_id`,`notification_key`);
+--> statement-breakpoint
+CREATE INDEX `idx_notification_reads_user` ON `notification_reads` (`user_id`);

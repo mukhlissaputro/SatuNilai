@@ -1,13 +1,14 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { assessmentPeriods, assessmentTypes, assignments, categories, indicatorScores, indicators, instrumentVersions, scoreOptions, subcategories, units, users } from "../../../db/schema";
-import { ApiError, apiError, assertSameOrigin, audit } from "../_security";
+import { ApiError, apiError, assertSameOrigin, audit, hashPassword } from "../_security";
 
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const id = request.headers.get("oai-authenticated-user-id");
-    const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
+    const local = ["localhost", "127.0.0.1"].includes(new URL(request.url).hostname);
+    const id = request.headers.get("oai-authenticated-user-id") ?? (local ? "local-admin" : null);
+    const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() ?? (local ? "admin@localhost" : undefined);
     if (!id || !email) throw new ApiError(401, "Autentikasi diperlukan");
     const db = getDb();
     const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(users);
@@ -19,12 +20,17 @@ export async function POST(request: Request) {
         try { displayName = decodeURIComponent(encodedName); } catch { /* use email */ }
       }
       current = { id, email, displayName, role: "admin" as const, unitId: null };
-      await db.insert(users).values({ id, email, displayName, role: "admin" });
+      const password = await hashPassword(local ? "Admin123!SatuNilai" : crypto.randomUUID());
+      await db.insert(users).values({ id, email, displayName, role: "admin", passwordHash: password.hash, passwordSalt: password.salt, passwordChangedAt: new Date().toISOString() });
       await audit(request, current, "system.bootstrap", "user", id, { role: "admin" });
     } else {
       const [existing] = await db.select().from(users).where(sql`${users.id} = ${id}`).limit(1);
       if (!existing) throw new ApiError(403, "Akun belum didaftarkan oleh administrator");
       current = { id: existing.id, email: existing.email, displayName: existing.displayName, role: existing.role, unitId: existing.unitId };
+      if (local && !existing.passwordHash) {
+        const password = await hashPassword("Admin123!SatuNilai");
+        await db.update(users).set({ passwordHash: password.hash, passwordSalt: password.salt, passwordChangedAt: new Date().toISOString() }).where(sql`${users.id} = ${id}`);
+      }
     }
 
     const [{ typeCount }] = await db.select({ typeCount: sql<number>`count(*)` }).from(assessmentTypes);

@@ -31,65 +31,29 @@ This starter does not use `wrangler.jsonc`.
 - `examples/d1/` contains an optional D1 example surface
 - `drizzle.config.ts` supports local migration generation when needed
 
-## Workspace Auth Headers
+## Autentikasi dan email reset
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+SatuNilai memakai password PBKDF2-SHA256 dan sesi acak di cookie `HttpOnly`, `SameSite=Strict`. Admin menentukan password awal saat membuat pengguna. Mengubah password pengguna akan mengakhiri seluruh sesi pengguna tersebut.
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+Untuk pengembangan lokal, akun awal adalah `admin@localhost` dengan password `Admin123!SatuNilai`. Ganti password ini melalui **Pengguna & Akses** sebelum memakai data penting.
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+Akun uji lokal untuk pemeriksaan hak akses:
 
-Treat the full name as optional and fall back to email when it is absent:
+- Staf: `staff@localhost` / `Staff123!SatuNilai` — akses ITKP.
+- Kepala Unit: `kepala.unit@localhost` / `Kepala123!SatuNilai` — akses ITKP dan SPBE.
 
-```tsx
-import { headers } from "next/headers";
+Akun uji hanya digunakan pada lingkungan lokal dan wajib diganti atau dinonaktifkan sebelum produksi.
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+Pengiriman reset password menggunakan Resend. Isi rahasia berikut pada lingkungan deployment (jangan commit nilainya):
 
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+RESEND_API_KEY=re_...
+MAIL_FROM=SatuNilai <noreply@domain-anda.go.id>
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Tanpa dua konfigurasi tersebut, endpoint tetap memberikan respons generik untuk mencegah enumerasi akun, tetapi email tidak dikirim. Domain pengirim harus sudah diverifikasi pada penyedia email.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+Terapkan migrasi `drizzle/0001_auth.sql` pada database yang sudah ada. Instalasi baru dapat menggunakan `database.sql`.
 
 ## Useful Commands
 

@@ -12,26 +12,34 @@ SatuNilai adalah aplikasi pengelolaan penilaian pemerintahan untuk SPBE, Indeks 
 
 ## Memulai
 
-1. Masuk melalui halaman privat aplikasi.
-2. Pengguna pertama menjadi administrator awal.
-3. Buka **Pengguna & Akses** untuk menambahkan unit dan pengguna.
+1. Masuk menggunakan email dan password yang diberikan administrator.
+2. Pada lokal, gunakan akun awal yang tercantum di README lalu segera ganti passwordnya.
+3. Buka **Pengguna & Akses** untuk menambahkan pengguna, peran, password awal, dan akses jenis penilaian.
 4. Buka **Jenis Penilaian** untuk memilih atau membuat instrumen.
 5. Buka **Tahun Penilaian** untuk menentukan jadwal dan tenggat.
 6. Tugaskan indikator kepada unit kerja sebelum staf mulai mengisi.
 
 ## Mengelola instrumen
 
-Pada **Struktur Indikator**, administrator dapat mengatur kategori, subkategori, indikator, bobot opsional, dan pilihan skala nilai. Instrumen yang sudah digunakan tidak diedit langsung. Buat versi baru agar data periode sebelumnya tetap utuh.
+Pada **Kategori Indikator**, administrator memilih jenis dan tahun penilaian, kemudian mengatur kategori, subkategori, indikator, bobot opsional, dan pilihan skala nilai. Instrumen yang sudah digunakan tidak diedit langsung. Buat versi baru agar data periode sebelumnya tetap utuh.
+
+## Login dan lupa password
+
+- Login memverifikasi email, password, status aktif, serta peran pengguna di server.
+- Pilih **Lupa password?**, masukkan email, lalu buka tautan yang dikirim. Tautan berlaku 30 menit dan hanya dapat digunakan sekali.
+- Demi keamanan, aplikasi selalu menampilkan respons yang sama baik email terdaftar maupun tidak.
+- Administrator dapat menetapkan password baru melalui menu **Pengguna & Akses**. Tindakan ini otomatis mengakhiri sesi lama pengguna.
 
 ## Mengisi penilaian
 
-1. Buka **Penilaian** dan pilih indikator.
-2. Pilih nilai internal sesuai skala indikator.
-3. Tambahkan catatan dan satu atau beberapa bukti.
-4. Simpan draf atau kirim kepada administrator.
-5. Administrator menyetujui atau menolak dengan catatan.
+1. Buka **Penilaian**, lalu pilih jenis dan tahun penilaian yang dapat diakses.
+2. Pilih subkategori dan isi nilai mandiri sesuai batas maksimum periode.
+3. Tambahkan catatan dan satu atau beberapa bukti pada indikator terkait.
+4. Bukti yang baru diunggah berstatus **Menunggu verifikasi admin**.
+5. Administrator memeriksa bukti pada tabel indikator, lalu memilih **Terima** atau **Tolak**. Penolakan wajib disertai alasan perbaikan.
+6. Kepala unit dapat memantau status: belum ada bukti, menunggu verifikasi, telah terverifikasi, atau belum sesuai, tanpa mengubah data.
 
-Penilaian yang ditolak dikembalikan kepada staf. Setelah finalisasi, data dikunci.
+Jika seluruh indikator telah mempunyai bukti yang diterima, administrator dapat membuka **Finalisasi & Nilai Asesor**, mengisi nilai final asesor untuk setiap subkategori, lalu memfinalisasi periode. Setelah finalisasi, nilai target, nilai mandiri, nilai asesor, dan bukti dikunci agar tidak dapat diubah.
 
 ## Bukti dukung
 
@@ -39,7 +47,7 @@ Bukti dapat berupa PDF, DOCX, XLSX, JPG, PNG, atau tautan HTTPS. Maksimum berkas
 
 ## Laporan
 
-Halaman **Laporan** menyiapkan rekap nilai akhir, analisis kesenjangan target, perbandingan nilai asesor, matriks indikator–bukti, dan catatan pemeriksa dalam PDF dan Excel.
+Halaman **Laporan** dimulai tanpa pilihan aktif. Pilih jenis dan tahun penilaian sesuai hak akses untuk menampilkan ringkasan adaptif, lalu unduh rekap target, nilai mandiri, nilai asesor, status verifikasi, matriks indikator–bukti, dan catatan pemeriksa dalam PDF atau Excel.
 
 ## Keamanan operasional
 

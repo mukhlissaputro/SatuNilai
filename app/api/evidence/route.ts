@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "../../../db";
 import { assessmentPeriods, evidence, evidenceLinks, evidenceVersions, indicatorScores } from "../../../db/schema";
 import { ApiError, apiError, assertSameOrigin, audit, getEvidenceBucket, requireAssignment, requireUser } from "../_security";
@@ -18,7 +19,7 @@ function validMagic(type: string, bytes: Uint8Array) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireUser(request, ["admin", "staff"]);
+    const user = await requireUser(request, ["staff"]);
     const form = await request.formData();
     const scoreId = String(form.get("scoreId") ?? "");
     const title = String(form.get("title") ?? "").trim().slice(0, 180);
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
     if (!score) throw new ApiError(404, "Penilaian indikator tidak ditemukan");
     await requireAssignment(user, score.periodId, score.indicatorId);
     if (user.role === "staff" && user.unitId !== score.unitId) throw new ApiError(403, "Bukti bukan milik unit Anda");
-    if (score.status === "locked" || score.periodStatus === "finalized") throw new ApiError(409, "Penilaian telah dikunci");
+    if (score.status === "approved" || score.status === "locked" || score.periodStatus === "finalized") throw new ApiError(409, "Bukti yang telah diterima atau penilaian yang telah final tidak dapat diubah");
 
     const evidenceId = crypto.randomUUID();
     const versionId = crypto.randomUUID();
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       db.insert(evidence).values({ id: evidenceId, unitId: score.unitId, title, sourceType: file instanceof File ? "file" : "link", currentVersionId: versionId, createdBy: user.id }),
       db.insert(evidenceVersions).values({ id: versionId, evidenceId, version: 1, objectKey, externalUrl: externalUrl || null, originalFilename: filename, contentType, sizeBytes, sha256, uploadedBy: user.id }),
       db.insert(evidenceLinks).values({ id: crypto.randomUUID(), evidenceId, scoreId }),
+      db.update(indicatorScores).set({ status: "submitted", reviewerNote: "", reviewedAt: null, reviewedBy: null, updatedAt: new Date().toISOString() }).where(eq(indicatorScores.id, scoreId)),
     ]);
     await audit(request, user, "evidence.created", "evidence", evidenceId, { scoreId, sourceType: file instanceof File ? "file" : "link", sha256 });
     return Response.json({ evidence: { id: evidenceId, title, sourceType: file instanceof File ? "file" : "link", filename } }, { status: 201 });
@@ -70,7 +72,37 @@ export async function GET(request: Request) {
     const user = await requireUser(request);
     const scoreId = new URL(request.url).searchParams.get("scoreId") ?? "";
     if (!scoreId) throw new ApiError(400, "scoreId wajib diisi");
-    const rows = await getDb().select({ id: evidence.id, title: evidence.title, sourceType: evidence.sourceType, status: evidence.status, versionId: evidence.currentVersionId, filename: evidenceVersions.originalFilename, externalUrl: evidenceVersions.externalUrl, sizeBytes: evidenceVersions.sizeBytes, createdAt: evidence.createdAt }).from(evidenceLinks).innerJoin(evidence, eq(evidence.id, evidenceLinks.evidenceId)).leftJoin(evidenceVersions, and(eq(evidenceVersions.evidenceId, evidence.id), eq(evidenceVersions.id, evidence.currentVersionId))).where(eq(evidenceLinks.scoreId, scoreId));
+    const score = await (env as unknown as { DB: D1Database }).DB.prepare("SELECT period_id AS periodId,indicator_id AS indicatorId,unit_id AS unitId FROM indicator_scores WHERE id=? LIMIT 1").bind(scoreId).first<{ periodId: string; indicatorId: string; unitId: string }>();
+    if (!score) throw new ApiError(404, "Penilaian indikator tidak ditemukan");
+    await requireAssignment(user, score.periodId, score.indicatorId);
+    if (user.role === "staff" && user.unitId !== score.unitId) throw new ApiError(403, "Bukti bukan milik unit Anda");
+    const rows = await getDb().select({ id: evidence.id, title: evidence.title, sourceType: evidence.sourceType, status: evidence.status, rejectedAt: evidence.rejectedAt, versionId: evidence.currentVersionId, filename: evidenceVersions.originalFilename, externalUrl: evidenceVersions.externalUrl, sizeBytes: evidenceVersions.sizeBytes, createdAt: evidence.createdAt }).from(evidenceLinks).innerJoin(evidence, eq(evidence.id, evidenceLinks.evidenceId)).leftJoin(evidenceVersions, and(eq(evidenceVersions.evidenceId, evidence.id), eq(evidenceVersions.id, evidence.currentVersionId))).where(eq(evidenceLinks.scoreId, scoreId));
     return Response.json({ evidence: rows, viewerRole: user.role }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return apiError(error); }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    assertSameOrigin(request);
+    const user = await requireUser(request, ["staff"]);
+    const body = await request.json() as { evidenceId?: string; scoreId?: string };
+    const evidenceId = String(body.evidenceId ?? "");
+    const scoreId = String(body.scoreId ?? "");
+    if (!evidenceId || !scoreId) throw new ApiError(400, "Bukti dan penilaian wajib dipilih");
+    const binding = (env as unknown as { DB: D1Database }).DB;
+    const score = await binding.prepare("SELECT s.period_id AS periodId,s.indicator_id AS indicatorId,s.unit_id AS unitId,s.status,p.status AS periodStatus FROM indicator_scores s JOIN assessment_periods p ON p.id=s.period_id JOIN evidence_links el ON el.score_id=s.id AND el.evidence_id=? WHERE s.id=? LIMIT 1").bind(evidenceId, scoreId).first<{ periodId: string; indicatorId: string; unitId: string; status: string; periodStatus: string }>();
+    if (!score) throw new ApiError(404, "Bukti tidak ditemukan pada indikator ini");
+    await requireAssignment(user, score.periodId, score.indicatorId);
+    if (user.unitId !== score.unitId) throw new ApiError(403, "Bukti bukan milik unit Anda");
+    if (!["submitted", "draft"].includes(score.status) || score.periodStatus === "finalized") throw new ApiError(409, "Hanya bukti yang menunggu verifikasi yang dapat dihapus");
+    await binding.prepare("DELETE FROM evidence_links WHERE evidence_id=? AND score_id=?").bind(evidenceId, scoreId).run();
+    const remaining = await binding.prepare("SELECT COUNT(*) AS total FROM evidence_links WHERE score_id=?").bind(scoreId).first<{ total: number }>();
+    const otherLinks = await binding.prepare("SELECT COUNT(*) AS total FROM evidence_links WHERE evidence_id=?").bind(evidenceId).first<{ total: number }>();
+    await binding.batch([
+      binding.prepare("UPDATE indicator_scores SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(Number(remaining?.total ?? 0) ? "submitted" : "draft", scoreId),
+      ...(Number(otherLinks?.total ?? 0) ? [] : [binding.prepare("UPDATE evidence SET status='deleted',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(evidenceId)]),
+    ]);
+    await audit(request, user, "evidence.unlinked", "evidence", evidenceId, { scoreId });
+    return Response.json({ deleted: true });
   } catch (error) { return apiError(error); }
 }
