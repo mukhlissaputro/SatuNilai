@@ -24,12 +24,14 @@ CREATE TABLE `assessment_types` (
 	`code` text NOT NULL,
 	`name` text NOT NULL,
 	`description` text DEFAULT '' NOT NULL,
+	`is_public` integer DEFAULT false NOT NULL,
 	`active` integer DEFAULT true NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_assessment_types_code` ON `assessment_types` (`code`);--> statement-breakpoint
+CREATE INDEX `idx_assessment_types_public_active` ON `assessment_types` (`is_public`,`active`);--> statement-breakpoint
 CREATE TABLE `user_assessment_types` (
 	`user_id` text NOT NULL,
 	`assessment_type_id` text NOT NULL,
@@ -100,6 +102,16 @@ CREATE TABLE `evidence` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_evidence_unit_status` ON `evidence` (`unit_id`,`status`);--> statement-breakpoint
+CREATE TABLE `evidence_favorites` (
+	`user_id` text NOT NULL,
+	`evidence_id` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`evidence_id`) REFERENCES `evidence`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_evidence_favorites_unique` ON `evidence_favorites` (`user_id`,`evidence_id`);--> statement-breakpoint
+CREATE INDEX `idx_evidence_favorites_user` ON `evidence_favorites` (`user_id`,`created_at`);--> statement-breakpoint
 CREATE TABLE `evidence_links` (
 	`id` text PRIMARY KEY NOT NULL,
 	`evidence_id` text NOT NULL,

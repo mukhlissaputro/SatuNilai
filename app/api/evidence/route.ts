@@ -8,6 +8,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 
 function safeFilename(name: string) { return name.normalize("NFKC").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120); }
+function friendlyTitle(name: string) { return name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (letter) => letter.toUpperCase()).slice(0, 180); }
 function isSafeUrl(value: string) { try { const url = new URL(value); return url.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(url.hostname); } catch { return false; } }
 function validMagic(type: string, bytes: Uint8Array) {
   if (type === "application/pdf") return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
@@ -22,11 +23,14 @@ export async function POST(request: Request) {
     const user = await requireUser(request, ["staff"]);
     const form = await request.formData();
     const scoreId = String(form.get("scoreId") ?? "");
-    const title = String(form.get("title") ?? "").trim().slice(0, 180);
+    let title = String(form.get("title") ?? "").trim().slice(0, 180);
     const externalUrl = String(form.get("url") ?? "").trim();
     const file = form.get("file");
-    if (!scoreId || !title) throw new ApiError(400, "Judul dan penilaian indikator wajib diisi");
+    if (!scoreId) throw new ApiError(400, "Penilaian indikator wajib diisi");
     if ((file instanceof File) === Boolean(externalUrl)) throw new ApiError(400, "Pilih tepat satu sumber: berkas atau tautan");
+    if (!title && file instanceof File) title = friendlyTitle(file.name);
+    if (!title && externalUrl) title = friendlyTitle(externalUrl.split("/").filter(Boolean).pop() || "Tautan Bukti");
+    if (!title) throw new ApiError(400, "Nama bukti wajib diisi");
 
     const db = getDb();
     const [score] = await db.select({ id: indicatorScores.id, periodId: indicatorScores.periodId, indicatorId: indicatorScores.indicatorId, unitId: indicatorScores.unitId, status: indicatorScores.status, periodStatus: assessmentPeriods.status }).from(indicatorScores).innerJoin(assessmentPeriods, eq(assessmentPeriods.id, indicatorScores.periodId)).where(eq(indicatorScores.id, scoreId)).limit(1);

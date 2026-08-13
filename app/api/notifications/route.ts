@@ -29,7 +29,7 @@ export async function GET(request: Request) {
             };
     const result = await db
       .prepare(
-        `SELECT s.id AS scoreId,s.status,s.reviewer_note AS reviewerNote,s.updated_at AS updatedAt,i.code,i.name,p.id AS periodId,p.year,t.code AS typeCode,COUNT(el.id) AS evidenceCount FROM indicator_scores s JOIN indicators i ON i.id=s.indicator_id JOIN assessment_periods p ON p.id=s.period_id JOIN assessment_types t ON t.id=p.assessment_type_id LEFT JOIN evidence_links el ON el.score_id=s.id WHERE EXISTS(SELECT 1 FROM evidence_links check_el WHERE check_el.score_id=s.id) ${scope.sql} GROUP BY s.id ORDER BY s.updated_at DESC LIMIT 50`,
+        `SELECT s.id AS scoreId,s.indicator_id AS indicatorId,i.subcategory_id AS subcategoryId,s.status,s.reviewer_note AS reviewerNote,s.updated_at AS updatedAt,i.code,i.name,p.id AS periodId,p.assessment_type_id AS typeId,p.year,t.code AS typeCode,COUNT(el.id) AS evidenceCount FROM indicator_scores s JOIN indicators i ON i.id=s.indicator_id JOIN assessment_periods p ON p.id=s.period_id JOIN assessment_types t ON t.id=p.assessment_type_id LEFT JOIN evidence_links el ON el.score_id=s.id WHERE EXISTS(SELECT 1 FROM evidence_links check_el WHERE check_el.score_id=s.id) ${scope.sql} GROUP BY s.id ORDER BY s.updated_at DESC LIMIT 50`,
       )
       .bind(...scope.values)
       .all();
@@ -53,7 +53,10 @@ export async function GET(request: Request) {
         return {
           key,
           scoreId: row.scoreId,
+          indicatorId: row.indicatorId,
+          subcategoryId: row.subcategoryId,
           periodId: row.periodId,
+          typeId: row.typeId,
           code: row.code,
           name: row.name,
           year: row.year,

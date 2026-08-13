@@ -5,6 +5,9 @@ import "./crud.css";
 import "./local-login.css";
 import "./workflow.css";
 import "./repository.css";
+import "./public-dashboard.css";
+import "./public-drilldown.css";
+import "./public-hero.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });

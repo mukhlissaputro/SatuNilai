@@ -49,6 +49,7 @@ export const assessmentTypes = sqliteTable("assessment_types", {
   code: text("code").notNull(),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
+  isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   ...timestamps,
 }, (table) => [uniqueIndex("idx_assessment_types_code").on(table.code)]);
@@ -166,6 +167,12 @@ export const evidence = sqliteTable("evidence", {
   createdBy: text("created_by").notNull().references(() => users.id),
   ...timestamps,
 }, (table) => [index("idx_evidence_unit_status").on(table.unitId, table.status)]);
+
+export const evidenceFavorites = sqliteTable("evidence_favorites", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  evidenceId: text("evidence_id").notNull().references(() => evidence.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_evidence_favorites_unique").on(table.userId, table.evidenceId), index("idx_evidence_favorites_user").on(table.userId, table.createdAt)]);
 
 export const evidenceVersions = sqliteTable("evidence_versions", {
   id: text("id").primaryKey(),

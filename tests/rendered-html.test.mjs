@@ -272,3 +272,57 @@ test("repositori bukti dan laporan visual tersedia", async () => {
   assert.match(excel, /Nilai Subkategori/);
   assert.match(excel, /Matriks Indikator/);
 });
+
+test("dashboard publik, visibilitas jenis, nama ramah, dan bukti favorit tersedia", async () => {
+  const [page, admin, repository, publicDashboard, schema, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/evidence-repository/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/public-dashboard/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_public_assessments_and_evidence_favorites.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /function PublicDashboard/);
+  assert.match(page, /Dashboard Penilaian Publik/);
+  assert.match(page, /Mengukur Kematangan, Menguatkan Tata Kelola, Mendorong Perbaikan Berkelanjutan/);
+  assert.match(page, /satunilai-assessment-ecosystem\.png/);
+  assert.match(page, />Login<\/button>/);
+  assert.match(page, /© 2026 SatuNilai/);
+  assert.match(page, /komnasham\.go\.id/);
+  assert.doesNotMatch(page, /Hasil penilaian yang terbuka, ringkas, dan mudah dipahami/);
+  assert.match(page, /Visibilitas dashboard/);
+  assert.match(page, /Nama bukti yang mudah dicari/);
+  assert.match(page, /toggleFavorite/);
+  assert.match(admin, /is_public AS isPublic/);
+  assert.match(repository, /evidence_favorites/);
+  assert.match(repository, /favorite DESC/);
+  assert.match(publicDashboard, /t\.is_public=1/);
+  assert.match(publicDashboard, /Cache-Control.*public/);
+  assert.doesNotMatch(publicDashboard, /original_filename|external_url|display_name/);
+  assert.match(schema, /evidenceFavorites/);
+  assert.match(migration, /ADD `is_public`/);
+});
+
+test("dashboard publik final interaktif, pencarian bukti, dan deep-link notifikasi tersedia", async () => {
+  const [page, publicDashboard, repository, notifications] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/public-dashboard/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/evidence-repository/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/notifications/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(publicDashboard, /p\.status='finalized'/);
+  assert.match(page, /PublicAssessmentDetail/);
+  assert.match(page, /Statistik Tahunan/);
+  assert.match(page, /PEMENUHAN KATEGORI/);
+  assert.match(page, /logo-komnas-ham\.png/);
+  assert.match(page, /Semua kategori/);
+  assert.match(page, /indicatorNames/);
+  assert.match(page, /approved-evidence/);
+  assert.match(repository, /ORDER BY approved DESC,favorite DESC/);
+  assert.match(repository, /ev\.content_type AS contentType/);
+  assert.match(notifications, /AS indicatorId/);
+  assert.match(notifications, /AS subcategoryId/);
+  assert.match(page, /attention=\{assessmentAttention\}/);
+  assert.match(page, /Pilih jenis penilaian/);
+  assert.doesNotMatch(page, /Kategori Instrumen/);
+});

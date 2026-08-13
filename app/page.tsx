@@ -284,11 +284,13 @@ export default function Home() {
   const [authView, setAuthView] = useState<"login" | "forgot" | "reset">(
     "login",
   );
+  const [showAuth, setShowAuth] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<
     Array<Record<string, unknown>>
   >([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [assessmentAttention, setAssessmentAttention] = useState<Record<string, unknown> | null>(null);
   const [adminData, setAdminData] = useState<AdminData>({
     units: [],
     users: [],
@@ -339,6 +341,13 @@ export default function Home() {
       ),
     );
     setShowNotifications(false);
+    setAssessmentAttention({
+      periodId: notification.periodId,
+      typeId: notification.typeId,
+      subcategoryId: notification.subcategoryId,
+      indicatorId: notification.indicatorId,
+      scoreId: notification.scoreId,
+    });
     setActive("Penilaian");
   };
 
@@ -398,8 +407,10 @@ export default function Home() {
     let active = true;
     async function connect() {
       try {
-        if (new URLSearchParams(window.location.search).has("reset"))
+        if (new URLSearchParams(window.location.search).has("reset")) {
           setAuthView("reset");
+          setShowAuth(true);
+        }
         await fetch("/api/bootstrap", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -601,7 +612,12 @@ export default function Home() {
     );
 
   if (!authReady) return <div className="auth-loading">Memuat SatuNilai…</div>;
-  if (!sessionUser) return <AuthScreen view={authView} setView={setAuthView} />;
+  if (!sessionUser)
+    return showAuth ? (
+      <AuthScreen view={authView} setView={setAuthView} onBack={() => setShowAuth(false)} />
+    ) : (
+      <PublicDashboard onLogin={() => setShowAuth(true)} />
+    );
 
   return (
     <main className="app-shell">
@@ -1313,6 +1329,8 @@ export default function Home() {
               }}
               flash={flash}
               role={sessionUser.role}
+              assessmentAttention={assessmentAttention}
+              clearAssessmentAttention={() => setAssessmentAttention(null)}
             />
           )}
         </div>
@@ -1623,12 +1641,120 @@ function DashboardWorkspace({
   );
 }
 
+function PublicDashboard({ onLogin }: { onLogin: () => void }) {
+  const [data, setData] = useState<{ assessments: Array<Record<string, unknown>>; updatedAt?: string }>({ assessments: [] });
+  const [loading, setLoading] = useState(true);
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState("");
+  const [selectedPeriodId, setSelectedPeriodId] = useState("");
+  useEffect(() => {
+    fetch("/api/public-dashboard", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((result) => setData(result))
+      .catch(() => setData({ assessments: [] }))
+      .finally(() => setLoading(false));
+  }, []);
+  const latest = data.assessments.map((item) => item.latest as Record<string, unknown>).filter(Boolean);
+  const finalCount = data.assessments.reduce((total, item) => total + ((item.history as Array<unknown> | undefined)?.length ?? 0), 0);
+  const totalIndicators = latest.reduce((sum, item) => sum + Number(item.totalIndicators ?? 0), 0);
+  const selectedAssessment = data.assessments.find((item) => String(item.id) === selectedAssessmentId);
+  const selectedHistory = ((selectedAssessment?.history as Array<Record<string, unknown>> | undefined) ?? []).slice().reverse();
+  const selectedPeriod = selectedHistory.find((item) => String(item.id) === selectedPeriodId);
+  return (
+    <main className="public-dashboard">
+      <header className="public-header">
+        <div className="public-brand">
+          <Image src="/brand/satunilai-mark.png" alt="Logo SatuNilai" width={46} height={46} />
+          <span className="public-brand-divider" aria-hidden="true" />
+          <Image className="public-komnas-logo" src="/logo-komnas-ham.png" alt="Logo Komnas HAM RI" width={46} height={46} />
+          <div><strong>SatuNilai</strong><small>Dashboard Penilaian Publik</small></div>
+        </div>
+        <button className="primary" onClick={onLogin}>Login</button>
+      </header>
+      <section className="public-hero">
+        <div>
+          <span>PENILAIAN TERINTEGRASI</span>
+          <h1>Mengukur Kematangan, Menguatkan Tata Kelola, Mendorong Perbaikan Berkelanjutan.</h1>
+          <p>SatuNilai menyatukan hasil evaluasi transformasi digital, tata kelola pengadaan, keamanan siber, pengelolaan data, dan berbagai instrumen lainnya agar capaian instansi dapat dipantau secara terukur, transparan, dan akuntabel sebagai dasar peningkatan layanan publik yang berkelanjutan.</p>
+        </div>
+        <div className="public-hero-image">
+          <Image src="/illustrations/satunilai-assessment-ecosystem.png" alt="Ilustrasi ekosistem penilaian terintegrasi untuk transformasi digital, tata kelola, keamanan siber, dan data" width={1536} height={1152} priority />
+        </div>
+      </section>
+      <section className="public-metrics" aria-label="Ringkasan penilaian publik">
+        <article><small>JENIS PENILAIAN PUBLIK</small><strong>{data.assessments.length}</strong><span>Dapat dilihat masyarakat</span></article>
+        <article><small>PERIODE FINAL</small><strong>{finalCount}</strong><span>Hasil asesor dipublikasikan</span></article>
+        <article><small>TOTAL INDIKATOR</small><strong>{totalIndicators}</strong><span>Pada periode terbaru</span></article>
+      </section>
+      <section className="public-assessments">
+        <div className="public-section-heading"><div><span>RINGKASAN NILAI</span><h2>Penilaian yang dipublikasikan</h2></div><small>Data diperbarui otomatis dari periode penilaian.</small></div>
+        {loading && <div className="public-empty">Memuat ringkasan penilaian…</div>}
+        {!loading && data.assessments.length === 0 && <div className="public-empty"><strong>Belum ada hasil penilaian publik yang final.</strong><p>Jenis penilaian tampil setelah ditetapkan publik dan periodenya telah difinalisasi administrator.</p></div>}
+        <div className="public-card-grid">
+          {data.assessments.map((assessment) => {
+            const period = assessment.latest as Record<string, unknown> | undefined;
+            const score = period?.score == null ? null : Number(period.score);
+            const max = Number(period?.maxScore ?? 0);
+            const percentage = max > 0 && score != null ? Math.min(100, Math.max(0, score / max * 100)) : 0;
+            const history = (assessment.history as Array<Record<string, unknown>> | undefined) ?? [];
+            const active = String(assessment.id) === selectedAssessmentId;
+            return <button type="button" className={`public-assessment-card ${active ? "selected" : ""}`} key={String(assessment.id)} onClick={() => { setSelectedAssessmentId(active ? "" : String(assessment.id)); setSelectedPeriodId(""); }} aria-expanded={active}>
+              <div className="public-card-top"><span>{String(assessment.code)}</span><em className="final">Final</em></div>
+              <h3>{String(assessment.name)}</h3><p>{String(assessment.description || "Ringkasan hasil penilaian periode terbaru.")}</p>
+              <div className="public-score"><strong>{score == null ? "—" : score.toFixed(2).replace(".", ",")}</strong><span>dari {max || "—"}<small>{String(period?.scoreKind ?? "belum tersedia")}</small></span></div>
+              <div className="public-progress"><i style={{ width: `${percentage}%` }} /></div>
+              <div className="public-card-meta"><span>Periode terbaru <b>{String(period?.year ?? "—")}</b></span><span><b>{history.length}</b> tahun final</span></div>
+              <span className="public-card-cta">{active ? "Tutup statistik" : "Lihat statistik tahunan"} <b>→</b></span>
+            </button>;
+          })}
+        </div>
+        {selectedAssessment && <PublicAssessmentDetail assessment={selectedAssessment} history={selectedHistory} selectedPeriodId={selectedPeriodId} onSelectPeriod={setSelectedPeriodId} selectedPeriod={selectedPeriod} />}
+      </section>
+      <footer className="public-footer"><span>© 2026 SatuNilai · Komisi Nasional Hak Asasi Manusia Republik Indonesia</span><a href="https://www.komnasham.go.id/" target="_blank" rel="noreferrer">komnasham.go.id</a></footer>
+    </main>
+  );
+}
+
+function PublicAssessmentDetail({ assessment, history, selectedPeriodId, onSelectPeriod, selectedPeriod }: { assessment: Record<string, unknown>; history: Array<Record<string, unknown>>; selectedPeriodId: string; onSelectPeriod: (id: string) => void; selectedPeriod?: Record<string, unknown> }) {
+  return <section className="public-drilldown" aria-live="polite">
+    <div className="drilldown-heading"><div><span>PERKEMBANGAN NILAI</span><h2>{String(assessment.code)} · Statistik Tahunan</h2></div><small>Klik tahun untuk melihat nilai pemenuhan setiap kategori.</small></div>
+    <div className="public-line-chart">
+      <div className="chart-grid" aria-hidden="true"><i /><i /><i /><i /></div>
+      {history.map((item, index) => {
+        const max = Math.max(1, Number(item.maxScore ?? 1));
+        const value = Number(item.score ?? 0);
+        const x = history.length === 1 ? 50 : index / (history.length - 1) * 100;
+        const y = 88 - Math.min(1, Math.max(0, value / max)) * 72;
+        const next = history[index + 1];
+        let segment: { width: string; transform: string } | null = null;
+        if (next) {
+          const nextX = (index + 1) / (history.length - 1) * 100;
+          const nextY = 88 - Math.min(1, Math.max(0, Number(next.score ?? 0) / Math.max(1, Number(next.maxScore ?? 1)))) * 72;
+          const dx = nextX - x; const dy = nextY - y;
+          segment = { width: `${Math.sqrt(dx * dx + dy * dy)}%`, transform: `rotate(${Math.atan2(dy, dx) * 180 / Math.PI}deg)` };
+        }
+        return <div className="chart-point-wrap" key={String(item.id)} style={{ left: `${x}%`, top: `${y}%` }}>
+          {segment && <i className="chart-segment" style={segment} />}
+          <button type="button" className={String(item.id) === selectedPeriodId ? "active" : ""} onClick={() => onSelectPeriod(String(item.id))} aria-label={`Tahun ${String(item.year)}, nilai ${value.toFixed(2)}`}><span>{value.toFixed(2).replace(".", ",")}</span><b /></button>
+          <strong>{String(item.year)}</strong>
+        </div>;
+      })}
+    </div>
+    {!selectedPeriod && <div className="year-hint">Pilih salah satu tahun pada grafik untuk membuka rincian kategori.</div>}
+    {selectedPeriod && <div className="public-category-reveal">
+      <header><div><span>PEMENUHAN KATEGORI</span><h3>{String(assessment.code)} Tahun {String(selectedPeriod.year)}</h3></div><strong>{Number(selectedPeriod.score ?? 0).toFixed(2).replace(".", ",")}<small>dari {String(selectedPeriod.maxScore)}</small></strong></header>
+      <div className="public-category-list">{((selectedPeriod.categories as Array<Record<string, unknown>> | undefined) ?? []).map((category, index) => { const value = Number(category.final ?? 0); const max = Math.max(1, Number(selectedPeriod.maxScore ?? 1)); return <article key={String(category.id)} style={{ "--delay": `${index * 70}ms` } as React.CSSProperties}><span>{String(category.code)}</span><div><strong>{String(category.name)}</strong><div><i style={{ width: `${Math.min(100, value / max * 100)}%` }} /></div><small>Bobot {Number(category.weight ?? 0)}%</small></div><b>{value.toFixed(2).replace(".", ",")}</b></article>; })}</div>
+    </div>}
+  </section>;
+}
+
 function AuthScreen({
   view,
   setView,
+  onBack,
 }: {
   view: "login" | "forgot" | "reset";
   setView: (view: "login" | "forgot" | "reset") => void;
+  onBack: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1727,6 +1853,9 @@ function AuthScreen({
       </section>
       <section className="auth-panel">
         <form className="auth-card" onSubmit={(event) => void submit(event)}>
+          {view === "login" && (
+            <button type="button" className="auth-public-back" onClick={onBack}>← Dashboard publik</button>
+          )}
           <div
             className="auth-logo-pair"
             aria-label="SatuNilai dan Komnas HAM RI"
@@ -1884,6 +2013,8 @@ function ModulePage({
   refreshAdmin,
   flash,
   role,
+  assessmentAttention,
+  clearAssessmentAttention,
 }: {
   active: string;
   categories: Category[];
@@ -1891,6 +2022,8 @@ function ModulePage({
   refreshAdmin: () => Promise<void>;
   flash: (message: string) => void;
   role: string;
+  assessmentAttention: Record<string, unknown> | null;
+  clearAssessmentAttention: () => void;
 }) {
   const canManage = role === "admin";
   const [showForm, setShowForm] = useState(false);
@@ -1988,10 +2121,9 @@ function ModulePage({
   }, [showForm, resource]);
   const openCreate = () => {
     setEditingId(null);
-    const firstType = adminData.types[0];
     setForm(
-      resource === "period" && firstType
-        ? { typeId: String(firstType.id), maxScore: "5" }
+      resource === "period"
+        ? { typeId: "", maxScore: "5" }
         : {},
     );
     setShowForm(true);
@@ -2029,7 +2161,7 @@ function ModulePage({
       payload.typeId =
         modal?.querySelector<HTMLSelectElement>("select")?.value ||
         form.typeId ||
-        String(adminData.types[0]?.id ?? "");
+        "";
       payload.year =
         modal?.querySelector<HTMLInputElement>("input[type=number]")?.value ||
         form.year ||
@@ -2121,6 +2253,8 @@ function ModulePage({
           ref={assessmentWorkspaceRef}
           flash={flash}
           onContextChange={setAssessmentTitle}
+          attention={assessmentAttention}
+          onAttentionHandled={clearAssessmentAttention}
         />
       )}
       {active === "Bukti Dukung" && (
@@ -2215,6 +2349,9 @@ function ModulePage({
               <div>
                 <span>
                   {String(type.active) === "1" ? "Aktif" : "Nonaktif"}
+                </span>
+                <span className={Number(type.isPublic) ? "visibility-public" : "visibility-private"}>
+                  {Number(type.isPublic) ? "Publik" : "Privat"}
                 </span>
                 <span>{String(type.versions)} versi</span>
               </div>
@@ -2463,6 +2600,14 @@ function ModulePage({
                     }
                   />
                 </label>
+                <label>
+                  Visibilitas dashboard
+                  <select value={form.isPublic ?? "0"} onChange={(e) => setForm({ ...form, isPublic: e.target.value })}>
+                    <option value="0">Privat · hanya setelah login</option>
+                    <option value="1">Publik · tampil di dashboard depan</option>
+                  </select>
+                  <small className="field-help">Dashboard publik hanya menampilkan nilai agregat dan progres, bukan dokumen bukti atau data pengguna.</small>
+                </label>
               </>
             )}
             {resource === "period" && (
@@ -2470,11 +2615,13 @@ function ModulePage({
                 <label>
                   Jenis
                   <select
+                    required
                     value={form.typeId ?? ""}
                     onChange={(e) =>
                       setForm({ ...form, typeId: e.target.value })
                     }
                   >
+                    <option value="">Pilih jenis penilaian</option>
                     {adminData.types.map((t) => (
                       <option key={String(t.id)} value={String(t.id)}>
                         {String(t.code)}
@@ -2599,6 +2746,7 @@ const EvidenceRepository = forwardRef<
   }>({ types: [], periods: [], evidence: [] });
   const [typeId, setTypeId] = useState("");
   const [periodId, setPeriodId] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [query, setQuery] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState("");
@@ -2630,11 +2778,21 @@ const EvidenceRepository = forwardRef<
   const periods = data.periods.filter(
     (period) => String(period.typeId) === typeId,
   );
-  const rows = data.evidence.filter((row) =>
-    `${String(row.title)} ${String(row.filename ?? "")} ${String(row.indicatorCodes ?? "")}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+  const categoryOptions = [...new Set(data.evidence.flatMap((row) => String(row.categoryNames ?? "").split(",").filter(Boolean)))].sort();
+  const rows = data.evidence.filter((row) => {
+    const searchable = `${String(row.title)} ${String(row.filename ?? "")} ${String(row.typeCodes ?? "")} ${String(row.categoryCodes ?? "")} ${String(row.categoryNames ?? "")} ${String(row.indicatorCodes ?? "")} ${String(row.indicatorNames ?? "")}`.toLowerCase();
+    return searchable.includes(query.toLowerCase()) && (!categoryFilter || String(row.categoryNames ?? "").split(",").includes(categoryFilter));
+  });
+  const evidenceKind = (row: Record<string, unknown>) => {
+    if (String(row.sourceType) === "link") return { label: "LINK", icon: "↗", tone: "link" };
+    const filename = String(row.filename ?? "").toLowerCase();
+    if (filename.endsWith(".pdf")) return { label: "PDF", icon: "P", tone: "pdf" };
+    if (filename.endsWith(".doc") || filename.endsWith(".docx")) return { label: "DOC", icon: "W", tone: "doc" };
+    if (filename.endsWith(".xls") || filename.endsWith(".xlsx")) return { label: "XLS", icon: "X", tone: "sheet" };
+    if (/\.(png|jpe?g|webp)$/.test(filename)) return { label: "IMG", icon: "▧", tone: "image" };
+    return { label: "FILE", icon: "▤", tone: "file" };
+  };
+  const friendlyEvidenceName = (name: string) => name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (letter) => letter.toUpperCase());
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
@@ -2667,6 +2825,13 @@ const EvidenceRepository = forwardRef<
       : `${window.location.origin}/api/evidence/${encodeURIComponent(String(row.id))}/download?view=1`;
     await navigator.clipboard.writeText(link);
     flash("Tautan bukti disalin");
+  };
+  const toggleFavorite = async (row: Record<string, unknown>) => {
+    const favorite = !Number(row.favorite);
+    const response = await fetch("/api/evidence-repository", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, favorite }) });
+    if (!response.ok) { flash("Favorit belum dapat diperbarui"); return; }
+    await load();
+    flash(favorite ? "Bukti dipin ke bagian atas" : "Bukti dilepas dari favorit");
   };
   const remove = async () => {
     if (!pendingDelete) return;
@@ -2704,6 +2869,7 @@ const EvidenceRepository = forwardRef<
               const next = event.target.value;
               setTypeId(next);
               setPeriodId("");
+              setCategoryFilter("");
               void load(next, "");
             }}
           >
@@ -2722,6 +2888,7 @@ const EvidenceRepository = forwardRef<
             value={periodId}
             onChange={(event) => {
               setPeriodId(event.target.value);
+              setCategoryFilter("");
               void load(typeId, event.target.value);
             }}
           >
@@ -2733,12 +2900,19 @@ const EvidenceRepository = forwardRef<
             ))}
           </select>
         </label>
+        <label>
+          Kategori
+          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+            <option value="">Semua kategori</option>
+            {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+          </select>
+        </label>
         <label className="repository-search">
           Cari
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Judul, berkas, indikator…"
+            placeholder="Nama bukti, kategori, kode atau nama indikator…"
           />
         </label>
       </section>
@@ -2760,22 +2934,28 @@ const EvidenceRepository = forwardRef<
             const viewUrl = row.externalUrl
               ? String(row.externalUrl)
               : `/api/evidence/${encodeURIComponent(String(row.id))}/download?view=1`;
+            const kind = evidenceKind(row);
             return (
-              <article key={String(row.id)}>
-                <span className="doc-icon">▤</span>
+              <article key={String(row.id)} className={Number(row.approved) ? "approved-evidence" : ""}>
+                <span className={`doc-icon kind-${kind.tone} ${Number(row.favorite) ? "favorite" : ""}`}><b>{kind.icon}</b><small>{kind.label}</small></span>
                 <div>
                   <strong>{String(row.title)}</strong>
+                  {Number(row.favorite) ? <em className="favorite-label">★ Favorit</em> : null}
+                  {Number(row.approved) ? <em className="approved-label">✓ Disetujui admin</em> : null}
                   <small>
                     {String(row.filename ?? row.externalUrl ?? "Dokumen")} ·{" "}
                     {Number(row.linkCount ?? 0)} indikator
                   </small>
                   <p>
                     {row.indicatorCodes
-                      ? `Indikator ${String(row.indicatorCodes)}`
+                      ? `${String(row.categoryNames ?? "Tanpa kategori")} · Indikator ${String(row.indicatorCodes)}`
                       : "Belum ditautkan ke indikator"}
                   </p>
                 </div>
                 <div className="repository-actions">
+                  <button type="button" className={`favorite-button ${Number(row.favorite) ? "active" : ""}`} onClick={() => void toggleFavorite(row)} aria-label={Number(row.favorite) ? "Lepas dari favorit" : "Tambahkan ke favorit"} title={Number(row.favorite) ? "Lepas dari favorit" : "Pin ke bagian atas"}>
+                    {Number(row.favorite) ? "★" : "☆"}
+                  </button>
                   <a href={viewUrl} target="_blank" rel="noreferrer">
                     Lihat
                   </a>
@@ -2820,12 +3000,13 @@ const EvidenceRepository = forwardRef<
               yang sesuai.
             </p>
             <label>
-              Judul bukti
+              Nama bukti yang mudah dicari
               <input
-                required
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
+                placeholder="Contoh: Rekap RUP Penyedia 2026"
               />
+              <small className="field-help">Jika dikosongkan, nama akan dibuat otomatis dari nama berkas.</small>
             </label>
             <label>
               Tautan HTTPS
@@ -2843,12 +3024,12 @@ const EvidenceRepository = forwardRef<
                 type="file"
                 disabled={Boolean(url)}
                 accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => { const selectedFile = event.target.files?.[0] ?? null; setFile(selectedFile); if (selectedFile && !title.trim()) setTitle(friendlyEvidenceName(selectedFile.name)); }}
               />
             </label>
             <button
               className="primary"
-              disabled={saving || !title || (!url && !file)}
+              disabled={saving || (!url && !file)}
             >
               {saving ? "Menyimpan…" : "Simpan Bukti"}
             </button>
@@ -3035,8 +3216,10 @@ const AssessmentWorkspace = forwardRef<
   {
     flash: (message: string) => void;
     onContextChange: (title: string) => void;
+    attention: Record<string, unknown> | null;
+    onAttentionHandled: () => void;
   }
->(function AssessmentWorkspace({ flash, onContextChange }, ref) {
+>(function AssessmentWorkspace({ flash, onContextChange, attention, onAttentionHandled }, ref) {
   const [data, setData] = useState<WorkspaceData>({
     types: [],
     periods: [],
@@ -3099,8 +3282,18 @@ const AssessmentWorkspace = forwardRef<
     );
   };
   useEffect(() => {
-    void load();
+    if (!attention?.periodId) void load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const requestedPeriodId = String(attention?.periodId ?? "");
+    if (!requestedPeriodId) return;
+    void load(requestedPeriodId).then(() => {
+      setSubcategoryId(String(attention?.subcategoryId ?? ""));
+      setIndicatorId(String(attention?.indicatorId ?? ""));
+      window.setTimeout(() => document.querySelector(".score-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 180);
+      onAttentionHandled();
+    });
+  }, [attention]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const periodsForType = data.periods.filter(
     (period) => String(period.typeId) === typeId,
@@ -3197,8 +3390,8 @@ const AssessmentWorkspace = forwardRef<
   };
   const saveEvidence = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!evidenceTitle || (!evidenceUrl && !evidenceFile)) {
-      flash("Isi judul dan pilih berkas atau tautan HTTPS");
+    if (!evidenceUrl && !evidenceFile) {
+      flash("Pilih berkas atau tautan HTTPS");
       return;
     }
     let scoreId = String(selectedIndicator?.scoreId ?? "");
@@ -3700,12 +3893,14 @@ const AssessmentWorkspace = forwardRef<
                     <strong>Tambah Bukti Dukung</strong>
                   </div>
                   <label>
-                    Judul bukti
+                    Nama bukti yang mudah dicari
                     <input
                       disabled={!canEdit}
                       value={evidenceTitle}
                       onChange={(event) => setEvidenceTitle(event.target.value)}
+                      placeholder="Contoh: Rekap RUP Penyedia 2026"
                     />
+                    <small>Jika dikosongkan, nama dibuat otomatis dari nama berkas.</small>
                   </label>
                   <label>
                     Tautan Google Drive / website
@@ -3723,9 +3918,7 @@ const AssessmentWorkspace = forwardRef<
                       disabled={!canEdit || Boolean(evidenceUrl)}
                       type="file"
                       accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
-                      onChange={(event) =>
-                        setEvidenceFile(event.target.files?.[0] ?? null)
-                      }
+                      onChange={(event) => { const selectedFile = event.target.files?.[0] ?? null; setEvidenceFile(selectedFile); if (selectedFile && !evidenceTitle.trim()) setEvidenceTitle(selectedFile.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (letter) => letter.toUpperCase())); }}
                     />
                   </label>
                   <button className="outline" disabled={!canEdit}>
@@ -4157,7 +4350,7 @@ const StructureManager = forwardRef<
       <section className="panel structure-panel nested-structure">
         <div className="structure-toolbar">
           <div>
-            <strong>Kategori Instrumen</strong>
+            <strong>Kategori Indikator</strong>
             <small>
               Setiap jenis dan tahun memakai versi instrumen tersendiri
             </small>

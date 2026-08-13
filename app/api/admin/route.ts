@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const [unitRows, userRows, typeRows, periodRows, structureRows] = await Promise.all([
       db.prepare("SELECT id, code, name, active FROM units ORDER BY name").all(),
       db.prepare("SELECT u.id, u.email, u.display_name AS displayName, u.role, u.active, GROUP_CONCAT(uat.assessment_type_id) AS assessmentTypeIds FROM users u LEFT JOIN user_assessment_types uat ON uat.user_id=u.id GROUP BY u.id ORDER BY u.display_name").all(),
-      db.prepare("SELECT t.id, t.code, t.name, t.description, t.active, COUNT(v.id) AS versions FROM assessment_types t LEFT JOIN instrument_versions v ON v.assessment_type_id = t.id GROUP BY t.id ORDER BY t.code").all(),
+      db.prepare("SELECT t.id, t.code, t.name, t.description, t.is_public AS isPublic, t.active, COUNT(v.id) AS versions FROM assessment_types t LEFT JOIN instrument_versions v ON v.assessment_type_id = t.id GROUP BY t.id ORDER BY t.code").all(),
       db.prepare("SELECT p.id, p.assessment_type_id AS typeId, p.instrument_version_id AS instrumentVersionId, p.name, p.year, p.max_score AS maxScore, p.starts_at AS startsAt, p.due_at AS dueAt, p.status, t.code AS typeCode, t.name AS typeName, v.version AS versionNumber, v.name AS versionName, v.status AS versionStatus FROM assessment_periods p JOIN assessment_types t ON t.id = p.assessment_type_id JOIN instrument_versions v ON v.id = p.instrument_version_id ORDER BY t.code, p.year DESC").all(),
       db.prepare("SELECT c.id AS categoryId, c.instrument_version_id AS instrumentVersionId, c.code AS categoryCode, c.name AS categoryName, c.weight_percent AS categoryWeight, c.target_value AS categoryTarget, c.sort_order AS categorySortOrder, sc.id AS subcategoryId, sc.code AS subcategoryCode, sc.name AS subcategoryName, sc.weight_percent AS subcategoryWeight, sc.target_value AS subcategoryTarget, sc.sort_order AS subcategorySortOrder, i.id AS indicatorId, i.code AS indicatorCode, i.name AS indicatorName, i.description AS indicatorDescription, i.weight_percent AS indicatorWeight, i.target_value AS indicatorTarget, i.sort_order AS indicatorSortOrder FROM categories c LEFT JOIN subcategories sc ON sc.category_id = c.id LEFT JOIN indicators i ON i.subcategory_id = sc.id ORDER BY c.sort_order, sc.sort_order, i.sort_order").all(),
     ]);
@@ -54,7 +54,8 @@ export async function POST(request: Request) {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);
       const name = String(body.name ?? "").trim().slice(0, 180);
       if (!code || !name) throw new ApiError(400, "Kode dan nama jenis wajib diisi");
-      await db.insert(assessmentTypes).values({ id, code, name, description: String(body.description ?? "").slice(0, 1000) });
+      const isPublic = body.isPublic === true || body.isPublic === 1 || body.isPublic === "1" || body.isPublic === "true";
+      await db.insert(assessmentTypes).values({ id, code, name, description: String(body.description ?? "").slice(0, 1000), isPublic });
     } else if (resource === "period") {
       const typeId = String(body.typeId ?? "");
       const year = Number(body.year);
@@ -107,7 +108,8 @@ export async function PATCH(request: Request) {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);
       const name = String(body.name ?? "").trim().slice(0, 180);
       if (!code || !name) throw new ApiError(400, "Kode dan nama jenis wajib diisi");
-      await db.update(assessmentTypes).set({ code, name, description: String(body.description ?? "").slice(0, 1000), active: body.active === undefined ? undefined : Boolean(body.active), updatedAt: now }).where(eq(assessmentTypes.id, id));
+      const isPublic = body.isPublic === true || body.isPublic === 1 || body.isPublic === "1" || body.isPublic === "true";
+      await db.update(assessmentTypes).set({ code, name, description: String(body.description ?? "").slice(0, 1000), isPublic, active: body.active === undefined ? undefined : Boolean(body.active), updatedAt: now }).where(eq(assessmentTypes.id, id));
     } else if (body.resource === "user") {
       const displayName = String(body.name ?? "").trim().slice(0, 160);
       const email = String(body.email ?? "").trim().toLowerCase().slice(0, 180);
