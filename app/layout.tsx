@@ -8,6 +8,7 @@ import "./repository.css";
 import "./public-dashboard.css";
 import "./public-drilldown.css";
 import "./public-hero.css";
+import "./structure-duplicate.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });

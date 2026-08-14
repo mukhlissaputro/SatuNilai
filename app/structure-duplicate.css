@@ -1,0 +1,34 @@
+.empty-structure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.duplicate-structure-button {
+  width: auto;
+  min-height: 38px;
+  padding: 9px 15px;
+  border: 1px solid #cec5f8;
+  border-radius: 10px;
+  background: #f4f1ff;
+  color: var(--purple);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.duplicate-structure-button:hover {
+  border-color: #a997ee;
+  background: #eae5ff;
+}
+
+.duplicate-structure-button:focus-visible {
+  outline: 3px solid #c4b8f5;
+  outline-offset: 3px;
+}
+
+.duplicate-structure-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

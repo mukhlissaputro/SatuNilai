@@ -326,3 +326,23 @@ test("dashboard publik final interaktif, pencarian bukti, dan deep-link notifika
   assert.match(page, /Pilih jenis penilaian/);
   assert.doesNotMatch(page, /Kategori Instrumen/);
 });
+
+test("admin dapat menduplikasi kategori indikator dari periode sebelumnya", async () => {
+  const [page, admin] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /previousPeriod/);
+  assert.match(page, /Duplikasi dari/);
+  assert.match(page, /resource: "structureDuplicate"/);
+  assert.match(page, /Belum ada kategori untuk/);
+  assert.match(admin, /resource === "structureDuplicate"/);
+  assert.match(admin, /sourceYear\) >= Number\(pair\.targetYear/);
+  assert.match(admin, /Periode tujuan sudah memiliki kategori indikator/);
+  assert.match(admin, /INSERT INTO categories/);
+  assert.match(admin, /INSERT INTO subcategories/);
+  assert.match(admin, /INSERT INTO indicators/);
+  assert.match(admin, /INSERT INTO score_options/);
+  assert.match(admin, /final_value,sort_order\).*NULL/);
+  assert.match(admin, /structure\.duplicated/);
+});

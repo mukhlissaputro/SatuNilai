@@ -77,6 +77,32 @@ export async function POST(request: Request) {
         db.insert(instrumentVersions).values({ id: versionId, assessmentTypeId: typeId, version: Number(next?.number ?? 1), name: `Instrumen ${type.code} ${year}`, status: "draft" }),
         db.insert(assessmentPeriods).values({ id, assessmentTypeId: typeId, instrumentVersionId: versionId, year, name, maxScore, startsAt, dueAt, status: "draft" }),
       ]);
+    } else if (resource === "structureDuplicate") {
+      const binding = (env as unknown as AdminEnv).DB;
+      const targetPeriodId = String(body.targetPeriodId ?? "");
+      const sourcePeriodId = String(body.sourcePeriodId ?? "");
+      if (!targetPeriodId || !sourcePeriodId || targetPeriodId === sourcePeriodId) throw new ApiError(400, "Periode sumber dan tujuan duplikasi tidak valid");
+      const pair = await binding.prepare("SELECT target.assessment_type_id AS targetTypeId, target.instrument_version_id AS targetVersionId, target.year AS targetYear, target.max_score AS targetMaxScore, target.status AS targetStatus, source.assessment_type_id AS sourceTypeId, source.instrument_version_id AS sourceVersionId, source.year AS sourceYear FROM assessment_periods target JOIN assessment_periods source ON source.id=? WHERE target.id=? LIMIT 1").bind(sourcePeriodId, targetPeriodId).first<{ targetTypeId: string; targetVersionId: string; targetYear: number; targetMaxScore: number; targetStatus: string; sourceTypeId: string; sourceVersionId: string; sourceYear: number }>();
+      if (!pair) throw new ApiError(404, "Periode sumber atau tujuan tidak ditemukan");
+      if (pair.targetTypeId !== pair.sourceTypeId || Number(pair.sourceYear) >= Number(pair.targetYear)) throw new ApiError(409, "Instrumen hanya dapat diduplikasi dari tahun sebelumnya pada jenis penilaian yang sama");
+      if (pair.targetStatus === "finalized") throw new ApiError(409, "Kategori indikator pada periode final tidak dapat diubah");
+      const [targetCount, sourceCount, sourceTarget] = await Promise.all([
+        binding.prepare("SELECT COUNT(*) AS count FROM categories WHERE instrument_version_id=?").bind(pair.targetVersionId).first<{ count: number }>(),
+        binding.prepare("SELECT COUNT(*) AS count FROM categories WHERE instrument_version_id=?").bind(pair.sourceVersionId).first<{ count: number }>(),
+        binding.prepare("SELECT MAX(COALESCE(sc.target_value,0)) AS maxTarget, MAX(COALESCE(so.value,0)) AS maxOption FROM subcategories sc JOIN categories c ON c.id=sc.category_id LEFT JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN score_options so ON so.indicator_id=i.id WHERE c.instrument_version_id=?").bind(pair.sourceVersionId).first<{ maxTarget: number; maxOption: number }>(),
+      ]);
+      if (Number(targetCount?.count ?? 0) > 0) throw new ApiError(409, "Periode tujuan sudah memiliki kategori indikator");
+      if (Number(sourceCount?.count ?? 0) === 0) throw new ApiError(409, "Tahun sebelumnya belum memiliki kategori indikator untuk diduplikasi");
+      if (Math.max(Number(sourceTarget?.maxTarget ?? 0), Number(sourceTarget?.maxOption ?? 0)) > Number(pair.targetMaxScore)) throw new ApiError(409, `Target atau opsi nilai pada instrumen tahun ${pair.sourceYear} melebihi nilai maksimal periode tujuan (${pair.targetMaxScore})`);
+      const prefix = `${pair.targetVersionId}:copy`;
+      await binding.batch([
+        binding.prepare("INSERT INTO categories(id,instrument_version_id,code,name,weight_percent,target_value,sort_order) SELECT ? || ':category:' || c.id, ?, c.code, c.name, c.weight_percent, NULL, c.sort_order FROM categories c WHERE c.instrument_version_id=?").bind(prefix, pair.targetVersionId, pair.sourceVersionId),
+        binding.prepare("INSERT INTO subcategories(id,category_id,code,name,weight_percent,target_value,final_value,sort_order) SELECT ? || ':subcategory:' || sc.id, ? || ':category:' || sc.category_id, sc.code, sc.name, sc.weight_percent, sc.target_value, NULL, sc.sort_order FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO indicators(id,subcategory_id,code,name,description,weight_percent,target_value,sort_order) SELECT ? || ':indicator:' || i.id, ? || ':subcategory:' || i.subcategory_id, i.code, i.name, i.description, i.weight_percent, NULL, i.sort_order FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO score_options(id,indicator_id,value,label,description,sort_order) SELECT ? || ':option:' || so.id, ? || ':indicator:' || so.indicator_id, so.value, so.label, so.description, so.sort_order FROM score_options so JOIN indicators i ON i.id=so.indicator_id JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+      ]);
+      await audit(request, user, "structure.duplicated", "assessment_period", targetPeriodId, { sourcePeriodId, sourceYear: pair.sourceYear });
+      return Response.json({ saved: true, sourceYear: pair.sourceYear }, { status: 201 });
     } else if (resource === "category") {
       const versionId = String(body.versionId ?? "instrument-spbe-2025-v1");
       await db.insert(categories).values({ id, instrumentVersionId: versionId, code: String(body.code ?? "").slice(0, 30), name: String(body.name ?? "").slice(0, 180), weightPercent: Number(body.weight ?? 0), targetValue: null, sortOrder: Number(body.sortOrder ?? 99) });

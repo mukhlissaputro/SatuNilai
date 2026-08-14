@@ -4172,6 +4172,7 @@ const StructureManager = forwardRef<
   } | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     resource: "category" | "subcategory" | "indicator";
     id: string;
@@ -4212,6 +4213,18 @@ const StructureManager = forwardRef<
     selectedStructure.forEach((row) => map.set(String(row.categoryId), row));
     return [...map.values()];
   }, [selectedStructure]);
+  const previousPeriod = useMemo(() => {
+    if (!selectedPeriod) return undefined;
+    return periodsForType
+      .filter((period) => Number(period.year) < Number(selectedPeriod.year))
+      .sort((left, right) => Number(right.year) - Number(left.year))
+      .find((period) => {
+        const versionId = String(period.instrumentVersionId ?? "");
+        return adminData.structure.some(
+          (row) => String(row.instrumentVersionId) === versionId,
+        );
+      });
+  }, [adminData.structure, periodsForType, selectedPeriod]);
   const subcategoriesFor = (categoryId: string) => {
     const map = new Map<string, StructureItem>();
     selectedStructure
@@ -4339,6 +4352,32 @@ const StructureManager = forwardRef<
     await refreshAdmin();
     flash(`${name} berhasil dihapus`);
   };
+  const duplicatePreviousStructure = async () => {
+    if (!selectedPeriod || !previousPeriod || duplicating) return;
+    setDuplicating(true);
+    const response = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resource: "structureDuplicate",
+        targetPeriodId: selectedPeriod.id,
+        sourcePeriodId: previousPeriod.id,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      sourceYear?: number;
+    };
+    setDuplicating(false);
+    if (!response.ok) {
+      flash(data.error ?? "Kategori indikator belum dapat diduplikasi");
+      return;
+    }
+    await refreshAdmin();
+    flash(
+      `Kategori indikator berhasil diduplikasi dari tahun ${data.sourceYear ?? previousPeriod.year}`,
+    );
+  };
   const resourceLabel =
     modal?.resource === "category"
       ? "Kategori"
@@ -4401,8 +4440,22 @@ const StructureManager = forwardRef<
         )}
         {effectivePeriodId && !categories.length && (
           <div className="empty-structure">
-            Belum ada kategori untuk {String(selectedPeriod?.typeCode)}{" "}
-            {String(selectedPeriod?.year)}. Tambahkan kategori pertama.
+            <span>
+              Belum ada kategori untuk {String(selectedPeriod?.typeCode)}{" "}
+              {String(selectedPeriod?.year)}. Tambahkan kategori pertama.
+            </span>
+            {previousPeriod && (
+              <button
+                type="button"
+                className="secondary duplicate-structure-button"
+                disabled={duplicating}
+                onClick={duplicatePreviousStructure}
+              >
+                {duplicating
+                  ? "Menduplikasi kategori…"
+                  : `⧉ Duplikasi dari ${String(previousPeriod.typeCode)} ${String(previousPeriod.year)}`}
+              </button>
+            )}
           </div>
         )}
         {categories.map((category, categoryIndex) => {
