@@ -13,7 +13,7 @@ SatuNilai adalah aplikasi pengelolaan penilaian pemerintahan untuk SPBE, Indeks 
 ## Memulai
 
 1. Masuk menggunakan email dan password yang diberikan administrator.
-2. Pada lokal, gunakan akun awal yang tercantum di README lalu segera ganti passwordnya.
+2. Pada Docker, gunakan ADMIN_EMAIL dan ADMIN_PASSWORD pada berkas .env server; akun demo lama tidak dibuat.
 3. Buka **Pengguna & Akses** untuk menambahkan pengguna, peran, password awal, dan akses jenis penilaian.
 4. Buka **Jenis Penilaian** untuk memilih atau membuat instrumen.
 5. Buka **Tahun Penilaian** untuk menentukan jadwal dan tenggat.

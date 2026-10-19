@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../../server/runtime";
 import { apiError, assertSameOrigin, hashToken, randomToken } from "../../_security";
 
-type MailEnv = { DB: D1Database; RESEND_API_KEY?: string; MAIL_FROM?: string };
+type MailEnv = { DB: LocalDatabase; RESEND_API_KEY?: string; MAIL_FROM?: string };
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);

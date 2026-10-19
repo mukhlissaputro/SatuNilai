@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { assessmentPeriods, assessmentTypes, categories, indicators, instrumentVersions, subcategories, units, users } from "../../../db/schema";
 import { ApiError, apiError, assertSameOrigin, audit, hashPassword, requireUser } from "../_security";
 
-type AdminEnv = { DB: D1Database };
+type AdminEnv = { DB: LocalDatabase };
 const allowedRoles = new Set(["admin", "staff", "head"]);
 const allowedStatuses = new Set(["draft", "open", "review", "finalized"]);
 
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       const allTypeRows = role === "admin" ? await binding.prepare("SELECT id FROM assessment_types").all() : null;
       const typeIds = role === "admin" ? (allTypeRows?.results ?? []).map((row) => String(row.id)) : requestedTypeIds;
       await db.insert(users).values({ id, email, displayName, role: role as "admin" | "staff" | "head", unitId: defaultUnit.id, passwordHash: password.hash, passwordSalt: password.salt, passwordChangedAt: new Date().toISOString() });
-      if (typeIds.length) await binding.batch(typeIds.map((typeId) => binding.prepare("INSERT OR IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)));
+      if (typeIds.length) await binding.batch(typeIds.map((typeId) => binding.prepare("INSERT IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)));
     } else if (resource === "type") {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);
       const name = String(body.name ?? "").trim().slice(0, 180);
@@ -125,7 +125,7 @@ export async function PATCH(request: Request) {
       const typeIds = role === "admin" ? (allTypeRows?.results ?? []).map((row) => String(row.id)) : requestedTypeIds;
       await binding.batch([
         binding.prepare("DELETE FROM user_assessment_types WHERE user_id=?").bind(id),
-        ...typeIds.map((typeId) => binding.prepare("INSERT OR IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)),
+        ...typeIds.map((typeId) => binding.prepare("INSERT IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)),
       ]);
     } else if (body.resource === "unit") {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);

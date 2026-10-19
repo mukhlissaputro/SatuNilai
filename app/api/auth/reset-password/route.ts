@@ -1,13 +1,13 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../../server/runtime";
 import { ApiError, apiError, assertSameOrigin, hashPassword, hashToken } from "../../_security";
 
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const body = await request.json() as { token?: string; password?: string };
-    const db = (env as unknown as { DB: D1Database }).DB;
+    const db = (env as unknown as { DB: LocalDatabase }).DB;
     const tokenHash = await hashToken(String(body.token ?? ""));
-    const reset = await db.prepare("SELECT id,user_id AS userId FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>CURRENT_TIMESTAMP LIMIT 1").bind(tokenHash).first<{ id: string; userId: string }>();
+    const reset = await db.prepare("SELECT id,user_id AS userId FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>? LIMIT 1").bind(tokenHash, new Date().toISOString()).first<{ id: string; userId: string }>();
     if (!reset) throw new ApiError(400, "Tautan reset tidak valid atau telah kedaluwarsa");
     const password = await hashPassword(String(body.password ?? ""));
     await db.batch([

@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { ApiError, apiError, assertSameOrigin, audit, getEvidenceBucket, requireUser } from "../_security";
 
-type Runtime = { DB: D1Database };
+type Runtime = { DB: LocalDatabase };
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 const safeFilename = (name: string) => name.normalize("NFKC").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     let unitId = user.unitId ?? String((await db.prepare("SELECT id FROM units WHERE active=1 ORDER BY created_at LIMIT 1").first<{ id: string }>())?.id ?? "");
     if (!unitId) {
       unitId = `repository-${user.id}`;
-      await db.prepare("INSERT OR IGNORE INTO units(id,code,name,active) VALUES(?,?,?,1)").bind(unitId, `REPO-${user.id.slice(0, 12)}`, `Repositori ${user.displayName}`).run();
+      await db.prepare("INSERT IGNORE INTO units(id,code,name,active) VALUES(?,?,?,1)").bind(unitId, `REPO-${user.id.slice(0, 12)}`, `Repositori ${user.displayName}`).run();
     }
     const evidenceId = crypto.randomUUID(); const versionId = crypto.randomUUID();
     let objectKey: string | null = null; let filename: string | null = null; let contentType: string | null = null; let sizeBytes: number | null = null; let sha256: string | null = null;

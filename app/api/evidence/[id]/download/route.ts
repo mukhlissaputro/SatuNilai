@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { env } from "cloudflare:workers";
+import { env } from "../../../../../server/runtime";
 import { getDb } from "../../../../../db";
 import { evidence, evidenceVersions } from "../../../../../db/schema";
 import {
@@ -41,7 +41,7 @@ export async function GET(
     if (user.role === "staff" && user.unitId !== row.unitId)
       throw new ApiError(403, "Anda tidak memiliki akses ke berkas ini");
     if (user.role !== "admin") {
-      const access = await (env as unknown as { DB: D1Database }).DB.prepare("SELECT 1 ok FROM evidence_links el JOIN indicator_scores s ON s.id=el.score_id JOIN assessment_periods p ON p.id=s.period_id JOIN user_assessment_types uat ON uat.assessment_type_id=p.assessment_type_id AND uat.user_id=? WHERE el.evidence_id=? LIMIT 1").bind(user.id, id).first();
+      const access = await (env as unknown as { DB: LocalDatabase }).DB.prepare("SELECT 1 ok FROM evidence_links el JOIN indicator_scores s ON s.id=el.score_id JOIN assessment_periods p ON p.id=s.period_id JOIN user_assessment_types uat ON uat.assessment_type_id=p.assessment_type_id AND uat.user_id=? WHERE el.evidence_id=? LIMIT 1").bind(user.id, id).first();
       if (!access) throw new ApiError(403, "Bukti tidak termasuk dalam akses penilaian Anda");
     }
     const object = await getEvidenceBucket().get(row.objectKey);

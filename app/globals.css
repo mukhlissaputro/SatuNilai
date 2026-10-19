@@ -2040,6 +2040,7 @@ td:last-child button {
 }
 .auth-card .primary {
   height: 48px;
+  font-size: 14px;
 }
 .auth-link {
   border: 0;

@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { getDb } from "../../../db";
 import { assessmentPeriods, evidence, evidenceLinks, evidenceVersions, indicatorScores } from "../../../db/schema";
 import { ApiError, apiError, assertSameOrigin, audit, getEvidenceBucket, requireAssignment, requireUser } from "../_security";
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
     const user = await requireUser(request);
     const scoreId = new URL(request.url).searchParams.get("scoreId") ?? "";
     if (!scoreId) throw new ApiError(400, "scoreId wajib diisi");
-    const score = await (env as unknown as { DB: D1Database }).DB.prepare("SELECT period_id AS periodId,indicator_id AS indicatorId,unit_id AS unitId FROM indicator_scores WHERE id=? LIMIT 1").bind(scoreId).first<{ periodId: string; indicatorId: string; unitId: string }>();
+    const score = await (env as unknown as { DB: LocalDatabase }).DB.prepare("SELECT period_id AS periodId,indicator_id AS indicatorId,unit_id AS unitId FROM indicator_scores WHERE id=? LIMIT 1").bind(scoreId).first<{ periodId: string; indicatorId: string; unitId: string }>();
     if (!score) throw new ApiError(404, "Penilaian indikator tidak ditemukan");
     await requireAssignment(user, score.periodId, score.indicatorId);
     if (user.role === "staff" && user.unitId !== score.unitId) throw new ApiError(403, "Bukti bukan milik unit Anda");
@@ -89,7 +89,7 @@ export async function DELETE(request: Request) {
     const evidenceId = String(body.evidenceId ?? "");
     const scoreId = String(body.scoreId ?? "");
     if (!evidenceId || !scoreId) throw new ApiError(400, "Bukti dan penilaian wajib dipilih");
-    const binding = (env as unknown as { DB: D1Database }).DB;
+    const binding = (env as unknown as { DB: LocalDatabase }).DB;
     const score = await binding.prepare("SELECT s.period_id AS periodId,s.indicator_id AS indicatorId,s.unit_id AS unitId,s.status,p.status AS periodStatus FROM indicator_scores s JOIN assessment_periods p ON p.id=s.period_id JOIN evidence_links el ON el.score_id=s.id AND el.evidence_id=? WHERE s.id=? LIMIT 1").bind(evidenceId, scoreId).first<{ periodId: string; indicatorId: string; unitId: string; status: string; periodStatus: string }>();
     if (!score) throw new ApiError(404, "Bukti tidak ditemukan pada indikator ini");
     await requireAssignment(user, score.periodId, score.indicatorId);
