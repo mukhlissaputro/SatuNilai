@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1792415106733,
+      "tag": "0000_hot_starjammers",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1792416794673,
+      "tag": "0001_restore_relational_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1792419726955,
+      "tag": "0002_public_assessments_and_evidence_favorites",
+      "breakpoints": true
+    }
+  ]
+}

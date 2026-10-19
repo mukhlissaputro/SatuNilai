@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { assessmentPeriods, assessmentTypes, categories, indicators, instrumentVersions, subcategories, units, users } from "../../../db/schema";
 import { ApiError, apiError, assertSameOrigin, audit, hashPassword, requireUser } from "../_security";
 
-type AdminEnv = { DB: D1Database };
+type AdminEnv = { DB: LocalDatabase };
 const allowedRoles = new Set(["admin", "staff", "head"]);
 const allowedStatuses = new Set(["draft", "open", "review", "finalized"]);
 
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       const allTypeRows = role === "admin" ? await binding.prepare("SELECT id FROM assessment_types").all() : null;
       const typeIds = role === "admin" ? (allTypeRows?.results ?? []).map((row) => String(row.id)) : requestedTypeIds;
       await db.insert(users).values({ id, email, displayName, role: role as "admin" | "staff" | "head", unitId: defaultUnit.id, passwordHash: password.hash, passwordSalt: password.salt, passwordChangedAt: new Date().toISOString() });
-      if (typeIds.length) await binding.batch(typeIds.map((typeId) => binding.prepare("INSERT OR IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)));
+      if (typeIds.length) await binding.batch(typeIds.map((typeId) => binding.prepare("INSERT IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)));
     } else if (resource === "type") {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);
       const name = String(body.name ?? "").trim().slice(0, 180);
@@ -96,10 +96,10 @@ export async function POST(request: Request) {
       if (Math.max(Number(sourceTarget?.maxTarget ?? 0), Number(sourceTarget?.maxOption ?? 0)) > Number(pair.targetMaxScore)) throw new ApiError(409, `Target atau opsi nilai pada instrumen tahun ${pair.sourceYear} melebihi nilai maksimal periode tujuan (${pair.targetMaxScore})`);
       const prefix = `${pair.targetVersionId}:copy`;
       await binding.batch([
-        binding.prepare("INSERT INTO categories(id,instrument_version_id,code,name,weight_percent,target_value,sort_order) SELECT ? || ':category:' || c.id, ?, c.code, c.name, c.weight_percent, NULL, c.sort_order FROM categories c WHERE c.instrument_version_id=?").bind(prefix, pair.targetVersionId, pair.sourceVersionId),
-        binding.prepare("INSERT INTO subcategories(id,category_id,code,name,weight_percent,target_value,final_value,sort_order) SELECT ? || ':subcategory:' || sc.id, ? || ':category:' || sc.category_id, sc.code, sc.name, sc.weight_percent, sc.target_value, NULL, sc.sort_order FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
-        binding.prepare("INSERT INTO indicators(id,subcategory_id,code,name,description,weight_percent,target_value,sort_order) SELECT ? || ':indicator:' || i.id, ? || ':subcategory:' || i.subcategory_id, i.code, i.name, i.description, i.weight_percent, NULL, i.sort_order FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
-        binding.prepare("INSERT INTO score_options(id,indicator_id,value,label,description,sort_order) SELECT ? || ':option:' || so.id, ? || ':indicator:' || so.indicator_id, so.value, so.label, so.description, so.sort_order FROM score_options so JOIN indicators i ON i.id=so.indicator_id JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO categories(id,instrument_version_id,code,name,weight_percent,target_value,sort_order) SELECT CONCAT('copy-category:', MD5(CONCAT(?, ':', c.id))), ?, c.code, c.name, c.weight_percent, NULL, c.sort_order FROM categories c WHERE c.instrument_version_id=?").bind(prefix, pair.targetVersionId, pair.sourceVersionId),
+        binding.prepare("INSERT INTO subcategories(id,category_id,code,name,weight_percent,target_value,final_value,sort_order) SELECT CONCAT('copy-subcategory:', MD5(CONCAT(?, ':', sc.id))), CONCAT('copy-category:', MD5(CONCAT(?, ':', sc.category_id))), sc.code, sc.name, sc.weight_percent, sc.target_value, NULL, sc.sort_order FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO indicators(id,subcategory_id,code,name,description,weight_percent,target_value,sort_order) SELECT CONCAT('copy-indicator:', MD5(CONCAT(?, ':', i.id))), CONCAT('copy-subcategory:', MD5(CONCAT(?, ':', i.subcategory_id))), i.code, i.name, i.description, i.weight_percent, NULL, i.sort_order FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO score_options(id,indicator_id,value,label,description,sort_order) SELECT CONCAT('copy-option:', MD5(CONCAT(?, ':', so.id))), CONCAT('copy-indicator:', MD5(CONCAT(?, ':', so.indicator_id))), so.value, so.label, so.description, so.sort_order FROM score_options so JOIN indicators i ON i.id=so.indicator_id JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
       ]);
       await audit(request, user, "structure.duplicated", "assessment_period", targetPeriodId, { sourcePeriodId, sourceYear: pair.sourceYear });
       return Response.json({ saved: true, sourceYear: pair.sourceYear }, { status: 201 });
@@ -153,7 +153,7 @@ export async function PATCH(request: Request) {
       const typeIds = role === "admin" ? (allTypeRows?.results ?? []).map((row) => String(row.id)) : requestedTypeIds;
       await binding.batch([
         binding.prepare("DELETE FROM user_assessment_types WHERE user_id=?").bind(id),
-        ...typeIds.map((typeId) => binding.prepare("INSERT OR IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)),
+        ...typeIds.map((typeId) => binding.prepare("INSERT IGNORE INTO user_assessment_types(user_id,assessment_type_id) VALUES(?,?)").bind(id, typeId)),
       ]);
     } else if (body.resource === "unit") {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);

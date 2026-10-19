@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { ApiError, apiError, assertSameOrigin, audit, getEvidenceBucket, requireUser } from "../_security";
 
-type Runtime = { DB: D1Database };
+type Runtime = { DB: LocalDatabase };
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 const safeFilename = (name: string) => name.normalize("NFKC").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     let unitId = user.unitId ?? String((await db.prepare("SELECT id FROM units WHERE active=1 ORDER BY created_at LIMIT 1").first<{ id: string }>())?.id ?? "");
     if (!unitId) {
       unitId = `repository-${user.id}`;
-      await db.prepare("INSERT OR IGNORE INTO units(id,code,name,active) VALUES(?,?,?,1)").bind(unitId, `REPO-${user.id.slice(0, 12)}`, `Repositori ${user.displayName}`).run();
+      await db.prepare("INSERT IGNORE INTO units(id,code,name,active) VALUES(?,?,?,1)").bind(unitId, `REPO-${user.id.slice(0, 12)}`, `Repositori ${user.displayName}`).run();
     }
     const evidenceId = crypto.randomUUID(); const versionId = crypto.randomUUID();
     let objectKey: string | null = null; let filename: string | null = null; let contentType: string | null = null; let sizeBytes: number | null = null; let sha256: string | null = null;
@@ -89,7 +89,7 @@ export async function PATCH(request: Request) {
       allowed = Boolean(await db.prepare("SELECT e.id FROM evidence e JOIN evidence_links el ON el.evidence_id=e.id JOIN indicator_scores s ON s.id=el.score_id JOIN assessment_periods p ON p.id=s.period_id JOIN user_assessment_types uat ON uat.assessment_type_id=p.assessment_type_id AND uat.user_id=? WHERE e.id=? AND e.status='active' LIMIT 1").bind(user.id, id).first());
     }
     if (!allowed) throw new ApiError(404, "Bukti tidak ditemukan atau tidak dapat diakses");
-    if (body.favorite) await db.prepare("INSERT OR IGNORE INTO evidence_favorites(user_id,evidence_id) VALUES(?,?)").bind(user.id, id).run();
+    if (body.favorite) await db.prepare("INSERT IGNORE INTO evidence_favorites(user_id,evidence_id) VALUES(?,?)").bind(user.id, id).run();
     else await db.prepare("DELETE FROM evidence_favorites WHERE user_id=? AND evidence_id=?").bind(user.id, id).run();
     await audit(request, user, body.favorite ? "evidence.favorite_added" : "evidence.favorite_removed", "evidence", id);
     return Response.json({ saved: true, favorite: Boolean(body.favorite) });

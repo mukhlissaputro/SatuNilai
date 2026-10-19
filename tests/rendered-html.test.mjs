@@ -5,14 +5,8 @@ import test from "node:test";
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    {
-      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
+  const { default: handler } = await import(workerUrl.href);
+  return handler(new Request("http://localhost/", { headers: { accept: "text/html" } }));
 }
 
 test("server merender aplikasi SatuNilai", async () => {
@@ -34,9 +28,8 @@ test("login, password, sesi, dan reset password tersedia", async () => {
   ]);
   assert.match(page, /Masuk ke SatuNilai/);
   assert.match(page, /Lupa password/);
-  assert.match(page, /Akun uji lokal/);
-  assert.match(page, /staff@localhost/);
-  assert.match(page, /kepala\.unit@localhost/);
+  assert.match(page, /Akun awal Docker/);
+  assert.doesNotMatch(page, /Admin123!SatuNilai/);
   assert.match(page, /Password baru \(opsional\)/);
   assert.match(security, /PBKDF2/);
   assert.match(security, /HttpOnly; SameSite=Strict/);
@@ -245,7 +238,7 @@ test("notifikasi verifikasi persisten dan tampilan admin hanya-baca tersedia", a
   assert.match(page, /Pilih tahun penilaian/);
   assert.match(workspace, /\["submitted", "draft"\]\.includes\(score\.status\)/);
   assert.match(notifications, /notification_reads/);
-  assert.match(notifications, /INSERT OR IGNORE/);
+  assert.match(notifications, /INSERT IGNORE/);
   assert.match(notifications, /s\.status IN \('submitted','draft'\)/);
   assert.match(notifications, /s\.status IN \('approved','rejected','locked'\)/);
   assert.match(schema, /notificationReads/);

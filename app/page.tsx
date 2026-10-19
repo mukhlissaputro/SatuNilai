@@ -411,10 +411,6 @@ export default function Home() {
           setAuthView("reset");
           setShowAuth(true);
         }
-        await fetch("/api/bootstrap", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
         const response = await fetch("/api/me", { cache: "no-store" });
         if (!response.ok) return;
         const data = (await response.json()) as {
@@ -1761,29 +1757,34 @@ function AuthScreen({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const localAccounts = [
-    {
-      role: "Administrator",
-      email: "admin@localhost",
-      password: "Admin123!SatuNilai",
-      access: "Semua jenis penilaian",
-    },
-    {
-      role: "Staf",
-      email: "staff@localhost",
-      password: "Staff123!SatuNilai",
-      access: "ITKP",
-    },
-    {
-      role: "Kepala Unit",
-      email: "kepala.unit@localhost",
-      password: "Kepala123!SatuNilai",
-      access: "ITKP dan SPBE",
-    },
-  ];
-  const isLocal =
-    typeof window !== "undefined" &&
-    ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const [developmentAccounts, setDevelopmentAccounts] = useState<{
+    key: string; email: string; role: string; label: string; displayName: string;
+  }[]>([]);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    let active = true;
+    void fetch("/api/auth/development", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => { if (active && data?.accounts) setDevelopmentAccounts(data.accounts); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const enterDevelopmentAccount = async (key: string) => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/auth/development", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account: key }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Akun development belum tersedia");
+      window.location.assign("/");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Masuk cepat belum dapat diproses");
+      setBusy(false);
+    }
+  };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (view === "reset" && password !== confirmPassword) {
@@ -1892,6 +1893,26 @@ function AuthScreen({
                 ? "Kami akan mengirim tautan reset jika email telah terdaftar."
                 : "Gunakan minimal 10 karakter untuk melindungi akun Anda."}
           </p>
+          {view === "login" && developmentAccounts.length > 0 && (
+            <section className="dev-accounts" aria-label="Masuk cepat Development">
+              <header>
+                <strong>Masuk cepat — Development</strong>
+                <small>Pilih akun untuk langsung masuk</small>
+              </header>
+              {developmentAccounts.map((account) => (
+                <button type="button" key={account.key} disabled={busy}
+                  onClick={() => void enterDevelopmentAccount(account.key)}
+                  aria-label={`Masuk sebagai ${account.label}`}>
+                  <span aria-hidden="true">{account.label.slice(0, 2).toUpperCase()}</span>
+                  <div>
+                    <strong>{account.label}</strong>
+                    {account.displayName !== account.email && <small>{account.displayName}</small>}
+                    <code>{account.email}</code>
+                  </div>
+                </button>
+              ))}
+            </section>
+          )}
           {view !== "reset" && (
             <label>
               Email
@@ -1972,34 +1993,7 @@ function AuthScreen({
               Kembali ke halaman masuk
             </button>
           )}
-          {isLocal && view === "login" && (
-            <section className="dev-accounts">
-              <header>
-                <strong>Akun uji lokal</strong>
-                <small>Klik akun untuk mengisi formulir</small>
-              </header>
-              {localAccounts.map((account) => (
-                <button
-                  type="button"
-                  key={account.email}
-                  onClick={() => {
-                    setEmail(account.email);
-                    setPassword(account.password);
-                    setMessage("");
-                  }}
-                >
-                  <span>{account.role.slice(0, 2).toUpperCase()}</span>
-                  <div>
-                    <strong>{account.role}</strong>
-                    <code>{account.email}</code>
-                    <small>
-                      {account.password} · Akses {account.access}
-                    </small>
-                  </div>
-                </button>
-              ))}
-            </section>
-          )}
+          {view === "login" && <p className="auth-message">Gunakan akun yang diberikan administrator. Akun awal Docker tersedia pada konfigurasi .env server.</p>}
         </form>
       </section>
     </main>

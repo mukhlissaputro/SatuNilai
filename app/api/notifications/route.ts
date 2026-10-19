@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import {
   ApiError,
   apiError,
@@ -6,7 +6,7 @@ import {
   requireUser,
 } from "../_security";
 
-type WorkspaceEnv = { DB: D1Database };
+type WorkspaceEnv = { DB: LocalDatabase };
 
 export async function GET(request: Request) {
   try {
@@ -85,12 +85,12 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireUser();
+    const user = await requireUser(request);
     const body = (await request.json()) as { key?: string };
     const key = String(body.key ?? "").slice(0, 500);
     if (!key) throw new ApiError(400, "Notifikasi tidak valid");
     await (env as unknown as WorkspaceEnv).DB.prepare(
-      "INSERT OR IGNORE INTO notification_reads(id,user_id,notification_key) VALUES(?,?,?)",
+      "INSERT IGNORE INTO notification_reads(id,user_id,notification_key) VALUES(?,?,?)",
     )
       .bind(crypto.randomUUID(), user.id, key)
       .run();

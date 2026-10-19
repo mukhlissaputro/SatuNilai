@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import {
   ApiError,
   apiError,
@@ -7,10 +7,10 @@ import {
   requireUser,
 } from "../_security";
 
-type WorkspaceEnv = { DB: D1Database };
+type WorkspaceEnv = { DB: LocalDatabase };
 
 async function assertTypeAccess(
-  db: D1Database,
+  db: LocalDatabase,
   user: Awaited<ReturnType<typeof requireUser>>,
   typeId: string,
 ) {
@@ -68,12 +68,13 @@ export async function GET(request: Request) {
       });
     await assertTypeAccess(db, user, String(selected.typeId));
 
-    const unit = user.unitId
+    const unit = user.role !== "admin" && user.unitId
       ? { id: user.unitId }
       : await db
           .prepare(
-            "SELECT id FROM units WHERE active=1 ORDER BY created_at LIMIT 1",
+            "SELECT id FROM units WHERE active=1 ORDER BY EXISTS(SELECT 1 FROM indicator_scores s WHERE s.period_id=? AND s.unit_id=units.id) DESC,created_at LIMIT 1",
           )
+          .bind(selected.id)
           .first<{ id: string }>();
     if (!unit)
       throw new ApiError(
@@ -234,7 +235,7 @@ export async function PATCH(request: Request) {
       const readiness = await db.prepare("SELECT COUNT(DISTINCT i.id) AS total,COUNT(DISTINCT CASE WHEN s.status='approved' AND EXISTS(SELECT 1 FROM evidence_links el WHERE el.score_id=s.id) THEN i.id END) AS approved FROM categories c JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=? WHERE c.instrument_version_id=?").bind(periodId, period.versionId).first<{ total: number; approved: number }>();
       if (!readiness || Number(readiness.total) === 0 || Number(readiness.approved) !== Number(readiness.total)) throw new ApiError(409, "Seluruh indikator harus memiliki bukti yang diterima admin sebelum finalisasi");
       const subcategories = await db.prepare("SELECT sc.id FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=? ORDER BY sc.sort_order").bind(period.versionId).all();
-      const updates: D1PreparedStatement[] = [];
+      const updates: PreparedStatement[] = [];
       for (const row of subcategories.results) {
         const value = Number(finalValues[String(row.id)]);
         if (!Number.isFinite(value) || value < 0 || value > period.maxScore) throw new ApiError(400, `Nilai final setiap subkategori wajib diisi antara 0 dan ${period.maxScore}`);

@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../server/runtime";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../db";
 import { auditLogs, users } from "../../db/schema";
@@ -35,7 +35,7 @@ export function clearSessionCookie(request: Request) { return sessionCookie("", 
 export async function createSession(userId: string) {
   const token = randomToken();
   const expiresAt = new Date(Date.now() + 43200000).toISOString();
-  await (env as unknown as { DB: D1Database }).DB.prepare("INSERT INTO auth_sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)").bind(crypto.randomUUID(), userId, await hashToken(token), expiresAt).run();
+  await (env as unknown as { DB: LocalDatabase }).DB.prepare("INSERT INTO auth_sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)").bind(crypto.randomUUID(), userId, await hashToken(token), expiresAt).run();
   return token;
 }
 
@@ -49,7 +49,7 @@ export function assertSameOrigin(request: Request) {
 export async function requireUser(request: Request, allowed?: AppRole[]): Promise<CurrentUser> {
   const token = (request.headers.get("cookie") ?? "").split(";").map((part) => part.trim()).find((part) => part.startsWith("satunilai_session="))?.slice("satunilai_session=".length);
   if (!token) throw new ApiError(401, "Autentikasi diperlukan");
-  const session = await (env as unknown as { DB: D1Database }).DB.prepare("SELECT user_id AS userId FROM auth_sessions WHERE token_hash=? AND expires_at>CURRENT_TIMESTAMP LIMIT 1").bind(await hashToken(token)).first<{ userId: string }>();
+  const session = await (env as unknown as { DB: LocalDatabase }).DB.prepare("SELECT user_id AS userId FROM auth_sessions WHERE token_hash=? AND expires_at>? LIMIT 1").bind(await hashToken(token), new Date().toISOString()).first<{ userId: string }>();
   if (!session) throw new ApiError(401, "Sesi telah berakhir");
   const db = getDb();
   const [record] = await db.select().from(users).where(and(eq(users.id, session.userId), eq(users.active, true))).limit(1);
@@ -60,7 +60,7 @@ export async function requireUser(request: Request, allowed?: AppRole[]): Promis
 
 export async function requireAssignment(user: CurrentUser, periodId: string, indicatorId: string) {
   if (user.role === "admin") return;
-  const binding = (env as unknown as { DB: D1Database }).DB;
+  const binding = (env as unknown as { DB: LocalDatabase }).DB;
   const access = await binding.prepare(`SELECT 1 ok FROM assessment_periods p JOIN user_assessment_types uat ON uat.assessment_type_id=p.assessment_type_id JOIN categories c ON c.instrument_version_id=p.instrument_version_id JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id WHERE p.id=? AND i.id=? AND uat.user_id=? LIMIT 1`).bind(periodId, indicatorId, user.id).first();
   if (!access) throw new ApiError(403, "Indikator tidak termasuk dalam akses penilaian Anda");
 }
@@ -75,13 +75,13 @@ export async function audit(request: Request, user: CurrentUser | null, action: 
 export function apiError(error: unknown) {
   if (error instanceof ApiError) return Response.json({ error: error.message }, { status: error.status });
   console.error("API error", error instanceof Error ? error.message : "unknown");
-  if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) return Response.json({ error: "Kode atau data tersebut sudah digunakan" }, { status: 409 });
-  if (error instanceof Error && /FOREIGN KEY constraint failed/i.test(error.message)) return Response.json({ error: "Data terkait belum valid atau masih digunakan" }, { status: 409 });
+  if (error instanceof Error && /UNIQUE constraint failed|Duplicate entry/i.test(error.message)) return Response.json({ error: "Kode atau data tersebut sudah digunakan" }, { status: 409 });
+  if (error instanceof Error && /FOREIGN KEY constraint failed|foreign key constraint fails/i.test(error.message)) return Response.json({ error: "Data terkait belum valid atau masih digunakan" }, { status: 409 });
   return Response.json({ error: "Permintaan tidak dapat diproses" }, { status: 500 });
 }
 
-export function getEvidenceBucket(): R2Bucket {
-  const bucket = (env as unknown as { EVIDENCE?: R2Bucket }).EVIDENCE;
+export function getEvidenceBucket(): EvidenceStorage {
+  const bucket = (env as unknown as { EVIDENCE?: EvidenceStorage }).EVIDENCE;
   if (!bucket) throw new ApiError(503, "Penyimpanan dokumen belum tersedia");
   return bucket;
 }

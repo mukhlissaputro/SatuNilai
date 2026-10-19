@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../../server/runtime";
 import { apiError, requireUser } from "../../_security";
 
 type Row = Record<string, unknown>;
@@ -14,7 +14,7 @@ function makePdf(pages: string[]) { const count = pages.length; const pageStart 
 
 export async function GET(request: Request) {
   try {
-    const user = await requireUser(request); const db = (env as unknown as { DB: D1Database }).DB; const periodId = new URL(request.url).searchParams.get("periodId") ?? "";
+    const user = await requireUser(request); const db = (env as unknown as { DB: LocalDatabase }).DB; const periodId = new URL(request.url).searchParams.get("periodId") ?? "";
     const period = await db.prepare(`SELECT p.id,p.year,p.max_score AS maxScore,t.id AS typeId,t.code,t.name FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id ${user.role === "admin" ? "" : "JOIN user_assessment_types uat ON uat.assessment_type_id=t.id AND uat.user_id=?"} WHERE p.id=? LIMIT 1`).bind(...(user.role === "admin" ? [periodId] : [user.id, periodId])).first<Row>();
     if (!period) return Response.json({ error: "Periode laporan tidak tersedia dalam akses Anda" }, { status: 403 });
     const unitFilter = user.role === "staff" && user.unitId ? "AND s.unit_id=?" : ""; const args = user.role === "staff" && user.unitId ? [user.unitId, periodId] : [periodId];

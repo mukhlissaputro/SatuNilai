@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
+import { env } from "../../../server/runtime";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { assessmentPeriods, categories, indicatorScores } from "../../../db/schema";
 import { ApiError, apiError, assertSameOrigin, audit, requireAssignment, requireUser } from "../_security";
 
-type DashboardEnv = { DB: D1Database };
+type DashboardEnv = { DB: LocalDatabase };
 
 export async function GET(request: Request) {
   try {

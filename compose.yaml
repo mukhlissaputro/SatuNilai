@@ -1,0 +1,54 @@
+name: satunilai
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-satunilai}
+      MARIADB_USER: ${DB_USER:-satunilai}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Jalankan npm run docker:setup terlebih dahulu}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Jalankan npm run docker:setup terlebih dahulu}
+      TZ: UTC
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 30s
+  app:
+    image: satunilai-app:production
+    build: .
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-satunilai}
+      DB_USER: ${DB_USER:-satunilai}
+      DB_PASSWORD: ${DB_PASSWORD:?Database password wajib diisi}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Password admin wajib diisi}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrator SatuNilai}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      VINEXT_TRUSTED_HOSTS: ${VINEXT_TRUSTED_HOSTS:-}
+      EVIDENCE_DIR: /data/evidence
+      TZ: UTC
+    volumes:
+      - evidence:/data/evidence
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+volumes:
+  database:
+  evidence:
