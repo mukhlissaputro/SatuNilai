@@ -26,6 +26,87 @@ docker compose up -d
 
 Database dan dokumen tersimpan dalam named volume `database` dan `evidence`. Menghentikan atau membuat ulang kontainer mempertahankan data. `docker compose down -v` menghapus seluruh volume beserta datanya: jangan gunakan untuk pembaruan biasa.
 
+## Instalasi bersih: hanya akun superadmin awal
+
+Gunakan prosedur ini bila ingin memulai dari nol, **tanpa database, pengguna, penilaian, atau evidence lama**. Instalasi baru tetap memerlukan MariaDB; yang baru adalah isi database dan volume dokumennya. Data lama tidak dihapus dan tidak diimpor.
+
+Dalam aplikasi saat ini, hak akses tertinggi bernama **`admin`**, bukan role terpisah `superadmin`. Pada instalasi bersih hanya satu akun tersebut yang dibuat, bersama satu unit internal. Jenis penilaian, periode, indikator, nilai, dan bukti masih kosong. Beranda publik tetap menjadi halaman pertama; klik **Login** untuk masuk sebagai administrator.
+
+### 1. Pilih proyek Docker yang belum pernah digunakan
+
+Contoh ini menggunakan proyek terpisah `ledi-pbj-bersih`, berkas konfigurasi `.env.bersih`, dan port **3001** agar dapat berjalan bersamaan dengan instalasi lama pada port 3000.
+
+```sh
+docker compose -p ledi-pbj-bersih --env-file .env ps -a
+```
+
+Jalankan pemeriksaan ini setelah `.env` biasa tersedia (`npm run docker:setup` bila belum ada). Jika proyek `ledi-pbj-bersih` pernah dipakai, volume lamanya mungkin masih ada meskipun daftar kontainer kosong. Periksa juga:
+
+```sh
+docker volume ls --filter label=com.docker.compose.project=ledi-pbj-bersih
+```
+
+Jika ada kontainer atau volume proyek tersebut, pilih nama baru, misalnya `ledi-pbj-bersih-2`, dan gunakan nama itu pada **semua** perintah `-p` berikut. Nama proyek baru menghasilkan volume database dan evidence tersendiri. Jangan menggunakan proyek `satunilai` untuk prosedur ini karena itu adalah nama instalasi lama.
+
+### 2. Buat konfigurasi khusus instalasi bersih
+
+Salin `.env.example` menjadi `.env.bersih` menggunakan editor atau pengelola berkas. Jika `.env.bersih` sudah ada dan dipakai instalasi lain, gunakan nama berkas baru; jangan menimpa kredensial yang masih diperlukan. Isi nilai berikut di berkas baru:
+
+```dotenv
+APP_BIND=127.0.0.1
+APP_PORT=3001
+DB_NAME=ledi_pbj
+DB_USER=ledi_pbj
+DB_PASSWORD=ISI_PASSWORD_DATABASE_BARU
+DB_ROOT_PASSWORD=ISI_PASSWORD_ROOT_BARU_YANG_BERBEDA
+ADMIN_EMAIL=superadmin@localhost
+ADMIN_NAME=Superadministrator Lemari Digital
+ADMIN_PASSWORD=ISI_PASSWORD_SUPERADMIN_BARU
+```
+
+Ganti ketiga contoh password dengan nilai rahasia yang berbeda. Password administrator harus 10–128 karakter. Untuk membuat nilai acak, jalankan `node -e "console.log(require('node:crypto').randomBytes(24).toString('hex'))"` secara terpisah untuk masing-masing password, lalu salin hasilnya ke berkas. Jangan commit atau membagikan `.env.bersih`; pola `.env*` sudah diabaikan Git.
+
+Variabel lain dari `.env.example` dapat dibiarkan pada nilai awal. `DB_HOST`/`DB_PORT` di berkas hanya untuk klien host; Compose menghubungkan aplikasi ke `db:3306`. Mode production ini tidak membuka port MariaDB ke host.
+
+### 3. Jalankan mode production
+
+Aktifkan Docker Desktop, kemudian jalankan dari direktori proyek:
+
+```sh
+docker compose -p ledi-pbj-bersih --env-file .env.bersih up -d --build --wait
+docker compose -p ledi-pbj-bersih --env-file .env.bersih ps
+docker compose -p ledi-pbj-bersih --env-file .env.bersih exec -T app node scripts/verify-schema.mjs
+```
+
+Compose membuat database dan penyimpanan bukti baru, menjalankan migrasi skema MariaDB, lalu membuat satu administrator awal. Verifikasi skema harus melaporkan 20 tabel, 31 foreign key, dan nol orphan.
+
+Untuk mempertahankan hanya akun awal, **jangan menjalankan** `npm run dev`, `npm run dev:docker`, atau menambahkan `compose.dev.yaml`: mode development membuat akun staf dan kepala unit. Jangan menjalankan importer legacy, memulihkan dump lama, atau menyalin evidence lama ke proyek baru ini.
+
+### 4. Login dan pastikan data kosong
+
+Buka http://localhost:3001, klik **Login**, lalu gunakan `ADMIN_EMAIL` dan `ADMIN_PASSWORD` dari `.env.bersih`. Pada menu Pengguna & Akses hanya ada administrator awal. Daftar penilaian dan bukti kosong; Anda dapat mulai membuat data baru dari sana.
+
+Untuk memeriksa jumlah pengguna dan data langsung melalui database, jalankan perintah berikut pada Terminal Mac/Linux:
+
+```sh
+docker compose -p ledi-pbj-bersih --env-file .env.bersih exec -T db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" exec mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -e "SELECT role,COUNT(*) AS jumlah FROM users GROUP BY role; SELECT COUNT(*) AS bukti FROM evidence; SELECT COUNT(*) AS periode FROM assessment_periods;"'
+```
+
+Hasil awal yang diharapkan: `admin = 1`, tidak ada role lain, `bukti = 0`, dan `periode = 0`. Login dapat menambahkan baris sesi dan audit; hal itu normal.
+
+### 5. Menghentikan atau menjalankan kembali
+
+Selalu sertakan nama proyek dan berkas konfigurasi yang sama:
+
+```sh
+docker compose -p ledi-pbj-bersih --env-file .env.bersih stop
+docker compose -p ledi-pbj-bersih --env-file .env.bersih up -d --wait
+```
+
+Menjalankan kembali proyek yang sama mempertahankan data barunya; tidak mengosongkannya lagi. Untuk awal kosong berikutnya, pilih nama proyek dan berkas konfigurasi baru. Prosedur ini tidak memerlukan `down -v` dan tidak menghapus instalasi lama.
+
+Perintah singkat seperti `npm run docker:backup` dan Compose tanpa `-p`/`--env-file` mengacu pada proyek/konfigurasi biasa. Jangan menggunakannya untuk administrasi instalasi bersih ini tanpa menyesuaikan proyek dan berkas konfigurasi; gunakan perintah eksplisit di atas agar tidak tertukar.
+
 ## Arsitektur lokal
 
 - React 19, TypeScript, vinext/Vite, server Node.js 22.
