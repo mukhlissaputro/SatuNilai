@@ -35,7 +35,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Database password wajib diisi}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Password admin wajib diisi}
-      ADMIN_NAME: ${ADMIN_NAME:-Administrator SatuNilai}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrator Lemari Digital}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-}
       VINEXT_TRUSTED_HOSTS: ${VINEXT_TRUSTED_HOSTS:-}

@@ -9,13 +9,13 @@ async function render() {
   return handler(new Request("http://localhost/", { headers: { accept: "text/html" } }));
 }
 
-test("server merender aplikasi SatuNilai", async () => {
+test("server merender aplikasi Lemari Digital", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /SatuNilai/);
-  assert.match(html, /Memuat SatuNilai/);
+  assert.match(html, /Lemari Digital/);
+  assert.match(html, /Memuat Lemari Digital/);
 });
 
 test("login, password, sesi, dan reset password tersedia", async () => {
@@ -26,7 +26,7 @@ test("login, password, sesi, dan reset password tersedia", async () => {
     readFile(new URL("../app/api/auth/forgot-password/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/reset-password/route.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /Masuk ke SatuNilai/);
+  assert.match(page, /Masuk ke LEDI PBJ/);
   assert.match(page, /Lupa password/);
   assert.match(page, /Akun awal Docker/);
   assert.doesNotMatch(page, /Admin123!SatuNilai/);
@@ -276,11 +276,11 @@ test("dashboard publik, visibilitas jenis, nama ramah, dan bukti favorit tersedi
     readFile(new URL("../drizzle/0005_public_assessments_and_evidence_favorites.sql", import.meta.url), "utf8"),
   ]);
   assert.match(page, /function PublicDashboard/);
-  assert.match(page, /Dashboard Penilaian Publik/);
-  assert.match(page, /Mengukur Kematangan, Menguatkan Tata Kelola, Mendorong Perbaikan Berkelanjutan/);
+  assert.match(page, /PENGADAAN BARANG\/JASA KOMNAS HAM/);
+  assert.match(page, /Satu Platform, Satu Sumber Data, Satu Mekanisme Monitoring/);
   assert.match(page, /satunilai-assessment-ecosystem\.png/);
   assert.match(page, />Login<\/button>/);
-  assert.match(page, /© 2026 SatuNilai/);
+  assert.match(page, /@ 2026 LEDI PBJ – Komnas HAM/);
   assert.match(page, /komnasham\.go\.id/);
   assert.doesNotMatch(page, /Hasil penilaian yang terbuka, ringkas, dan mudah dipahami/);
   assert.match(page, /Visibilitas dashboard/);

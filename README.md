@@ -1,6 +1,6 @@
-# SatuNilai
+# Lemari Digital — LEDI PBJ Komnas HAM
 
-Aplikasi manajemen penilaian SPBE, Indeks SDI, EPSS, ITKP, dan instrumen pemerintahan lainnya. Mendukung instrumen berversi, hak akses, penilaian mandiri, verifikasi, bukti privat, finalisasi, notifikasi, dan laporan.
+Aplikasi pengelolaan data dukung Pengadaan Barang/Jasa, pemantauan ITKP, dan pemenuhan bukti maturitas UKPBJ. Mendukung instrumen berversi, hak akses, penilaian mandiri, verifikasi, bukti privat, finalisasi, notifikasi, dan laporan.
 
 ## Menjalankan dengan Docker Desktop
 
@@ -13,7 +13,7 @@ docker compose up -d --build
 
 Buka http://localhost:3000. Email admin awal berada pada `ADMIN_EMAIL` dan password pada `ADMIN_PASSWORD` dalam `.env`. Password dibuat acak; tidak ada akun demo atau password bawaan tetap. Berkas `.env` tidak masuk Git atau image Docker.
 
-Instalasi baru berisi satu unit internal dan administrator. Buat jenis penilaian, tahun, kategori/subkategori/indikator, serta akun staf melalui menu pengelolaan. Data D1 lokal yang tersedia telah dimigrasikan pada instalasi ini. Untuk instalasi baru lain, pemindahan data lama dilakukan melalui prosedur migrasi di bawah.
+Instalasi baru berisi satu unit internal dan administrator. Buat jenis penilaian, tahun, kategori/subkategori/indikator, serta akun staf melalui menu pengelolaan. Data dari komputer lain tidak ikut berpindah melalui Git. Untuk data terbaru di Mac, ikuti [migrasi Mac ke MariaDB](#migrasi-data-terbaru-dari-mac-ke-mariadb).
 
 ```powershell
 docker compose ps
@@ -66,7 +66,120 @@ Fitur ini memerlukan NODE_ENV=development dan DEV_QUICK_LOGIN=1, yang hanya diak
 
 Tes development: `node --test tests/development-login.test.mjs` ketika kontainer development berjalan.
 
-## Migrasi data D1 lokal
+## Migrasi data terbaru dari Mac ke MariaDB
+
+Jalankan langkah berikut di Terminal **Mac**, dari direktori proyek. Prosedur ini berlaku untuk aplikasi lama yang datanya masih berada pada SQLite/D1 lokal di `.wrangler`; menjalankan aplikasi melalui Node tidak otomatis berarti databasenya sudah MariaDB. Jika Mac sudah menggunakan MariaDB, gunakan bagian **Backup dan pemulihan**, bukan importer SQLite ini.
+
+Sumber utama adalah data Mac. Jangan menyalin database Windows untuk menggantikan data Mac. Diperlukan Node.js >=22.13, Docker Desktop yang aktif, dan ruang untuk backup database beserta dokumen.
+
+### 1. Hentikan aplikasi lama dan simpan backup Mac
+
+Hentikan server Node lama dengan `Ctrl+C` agar data tidak berubah selama pengambilan snapshot. Simpan seluruh state Cloudflare, termasuk database, WAL, dan penyimpanan R2 lokal, sebelum memperbarui kode:
+
+```sh
+BACKUP_DIR="$HOME/lemari-digital-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$BACKUP_DIR"
+cp -Rp .wrangler "$BACKUP_DIR/"
+if [ -f .env ]; then cp -p .env "$BACKUP_DIR/"; fi
+if [ -d data ]; then cp -Rp data "$BACKUP_DIR/"; fi
+```
+
+Jika `.wrangler` tidak ditemukan, identifikasi lokasi database sebenarnya terlebih dahulu. Jangan melanjutkan dengan database kosong. Backup berada di luar repository dan harus disimpan privat.
+
+### 2. Ambil kode terbaru
+
+Pastikan `git status` bersih. Simpan perubahan kode lokal sebelum penggabungan. Jika masih berada dalam percobaan merge gagal sebelumnya, selesaikan atau batalkan percobaan itu dahulu.
+
+```sh
+git fetch origin
+git merge --ff-only origin/codex/local-mac-integration
+npm ci
+```
+
+Jika fast-forward ditolak, jangan menggunakan reset paksa: periksa commit lokal yang berbeda. Git hanya memperbarui kode; data Mac tetap berada di tempat semula.
+
+### 3. Pilih database sumber dan buat snapshot konsisten
+
+Daftar kandidat database aplikasi:
+
+```sh
+find .wrangler/state/v3/d1 -type f -name '*.sqlite' ! -name 'metadata.sqlite'
+```
+
+Isi `SOURCE_DB` dengan path database aplikasi yang benar dari hasil tersebut. Jika ada lebih dari satu kandidat, pastikan database yang berisi data terbaru; jangan memilih database metadata/R2.
+
+```sh
+SOURCE_DB="/path/absolut/database-aplikasi.sqlite"
+MIGRATION_DIR="$PWD/backups/migrasi-mac-$(date +%Y%m%d-%H%M%S)"
+node scripts/export-legacy.mjs "$SOURCE_DB" "$MIGRATION_DIR"
+```
+
+Ganti contoh `SOURCE_DB` sebelum menjalankannya. Exporter memeriksa integritas/relasi SQLite, membuat `source.sqlite` dan `source.json`, lalu menampilkan jumlah baris tiap tabel. Database asli tidak diubah. Sumber terbaru mencakup 20 tabel, termasuk favorit dan visibilitas publik; sumber lama 19 tabel juga diterima. Pastikan jumlah unit, pengguna, periode, indikator, dan nilai sesuai data Mac.
+
+### 4. Periksa apakah ada bukti berupa berkas
+
+```sh
+node --input-type=module - "$MIGRATION_DIR/source.json" <<'NODE'
+import { readFileSync } from 'node:fs';
+const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const versions = payload.tables.evidence_versions.rows;
+console.log({ evidenceVersions: versions.length, fileVersions: versions.filter(row => row.object_key).length });
+NODE
+```
+
+**Jika `fileVersions` lebih dari nol, hentikan prosedur di sini.** Importer saat ini menolak sumber dengan `object_key`, karena penyalinan dan verifikasi isi berkas dari R2 lokal ke volume bukti belum diimplementasikan. Backup `.wrangler` pada langkah 1 mempertahankan berkas tersebut. Jangan menghapus baris bukti atau mengosongkan `object_key` untuk melewati pemeriksaan. Bukti yang berupa tautan HTTPS dapat diimpor oleh prosedur berikut. Kegagalan unggah sebelumnya tidak membuktikan bahwa semua versi berkas kosong; periksa hasil hitung ini.
+
+### 5. Siapkan MariaDB Docker dan cadangkan target
+
+```sh
+npm run docker:setup
+```
+
+Script membuat `.env` dengan password acak hanya jika belum ada. Jika Mac mempunyai `.env` lama, script mempertahankannya: lengkapi variabel database dan admin menggunakan `.env.example` sebagai acuan sebelum menjalankan Compose. Simpan nilai lama yang masih diperlukan. `DB_PASSWORD`, `DB_ROOT_PASSWORD`, dan `ADMIN_PASSWORD` wajib terisi; `ADMIN_PASSWORD` harus 10–128 karakter.
+
+Tetapkan `ADMIN_EMAIL` sesuai email administrator sumber yang hendak digabung **sebelum** inisialisasi target. Kebijakan yang dipilih adalah mempertahankan password admin Docker; profil dan relasi admin sumber dipindahkan ke akun tersebut. Pengguna lain mempertahankan kredensial sumbernya. Mengubah `.env` sesudah inisialisasi tidak mengganti password akun atau pengguna MariaDB yang sudah ada.
+
+```sh
+docker compose up -d --build --wait
+npm run docker:backup
+docker compose stop app
+docker compose run --rm --no-deps app node scripts/verify-schema.mjs
+```
+
+Pastikan verifikasi melaporkan `applicationTables: 20`, `foreignKeys: 31`, dan `orphanRows: 0`. Untuk Mac yang belum mempunyai MariaDB, gunakan target baru agar data sumber tidak berbenturan dengan data uji. Jangan menyalin volume database Windows. Jika target sudah berisi data, importer mempertahankannya dan menolak konflik; importer tidak menggantinya otomatis. Jangan menjalankan mode development sebelum impor karena mode itu dapat menambahkan akun development.
+
+### 6. Dry-run, impor, dan verifikasi
+
+Gunakan Terminal yang sama agar `MIGRATION_DIR` masih terdefinisi. Aplikasi harus tetap berhenti selama seluruh rangkaian ini. Jalankan perintah satu per satu dan lanjutkan **hanya jika perintah sebelumnya berhasil**:
+
+```sh
+docker compose run --rm --no-deps --user root --volume "$MIGRATION_DIR:/migration" app node scripts/import-legacy.mjs /migration/source.json --dry-run
+docker compose run --rm --no-deps --user root --volume "$MIGRATION_DIR:/migration" app node scripts/import-legacy.mjs /migration/source.json
+docker compose run --rm --no-deps --user root --volume "$MIGRATION_DIR:/migration" app node scripts/import-legacy.mjs /migration/source.json --verify-only
+docker compose run --rm --no-deps --user root --volume "$MIGRATION_DIR:/migration" app node scripts/import-legacy.mjs /migration/source.json
+docker compose run --rm --no-deps app node scripts/verify-schema.mjs
+```
+
+Dry-run melakukan transaksi lalu rollback. Impor nyata memeriksa setiap baris sebelum commit. `--verify-only` membandingkan hasil tanpa menulis data; `verifiedRows` harus sama dengan `sourceRows`. Impor ulang terakhir harus melaporkan `inserted: 0`, dengan seluruh baris tetap terverifikasi. Laporan ditulis di folder snapshot, termasuk `source.json.imported.json` dan `source.json.verified.json`.
+
+Jika ada konflik akun selain admin yang diizinkan, perbedaan isi baris dengan ID sama, nilai terlalu panjang untuk kolom, atau kegagalan foreign key, transaksi perintah tersebut dibatalkan. Jangan mematikan foreign key atau memaksa pengabaian konflik. Perintah impor yang telah berhasil sebelumnya tetap committed meskipun pemeriksaan sesudahnya gagal; gunakan backup target untuk pemulihan bila diperlukan.
+
+### 7. Jalankan dan periksa hasil di browser
+
+```sh
+docker compose up -d --wait app
+docker compose ps
+```
+
+Buka http://localhost:3000, masuk dengan admin Docker, lalu bandingkan pengguna, jenis penilaian, periode, kategori/indikator, nilai, favorit, dan tautan bukti dengan sumber Mac. Beranda publik hanya menampilkan jenis yang ditetapkan publik dan periode final, sehingga halaman publik kosong bukan bukti bahwa impor gagal.
+
+Setelah verifikasi selesai, development dapat dijalankan dengan `npm run dev:docker`; MariaDB dan volume bukti yang sama tetap digunakan. Server Node lama yang memakai SQLite tidak perlu dijalankan bersamaan. Simpan backup Mac dan laporan privat sampai hasil migrasi disetujui. Jangan menggunakan `docker compose down -v` untuk memperbarui aplikasi.
+
+### Catatan keamanan data
+
+`source.json` berisi hash password dan sesi, sementara `.env` berisi kredensial. Jangan commit `.wrangler`, `.env`, `data`, `backups`, atau file dump ke Git. Jangan membagikan isi `source.json`; gunakan ringkasan jumlah baris untuk pemeriksaan.
+
+## Utilitas migrasi D1 lokal terdahulu
 
 ```powershell
 npm run db:import:legacy
@@ -78,7 +191,7 @@ Akun admin dengan email ADMIN_EMAIL boleh digabung: ID, email, password hash/sal
 
 Laporan privat tersimpan bersama source.sqlite/source.json di backups/legacy-<waktu>/. Lokasi laporan terakhir dicatat pada outputs/legacy-migration-latest.json. Source.json memuat hash kredensial dan sesi, sehingga tidak boleh dimasukkan ke Git atau dibagikan sebagai laporan publik.
 
-Migrasi ini memindahkan seluruh 19 tabel aplikasi yang tersedia pada D1 lokal: 48 baris sumber terverifikasi, termasuk satu admin yang digabung. Database lama tidak memiliki dokumen bukti, sehingga tidak ada berkas R2 untuk dipindahkan. Importer menolak sumber yang memiliki berkas bukti sampai pemindahan berkas yang terverifikasi disediakan. Snapshot menyimpan metadata internal Cloudflare sebagai arsip; tabel internal tersebut bukan bagian skema MariaDB aplikasi.
+Hasil pengujian terdahulu di Windows memindahkan 19 tabel/48 baris, termasuk satu admin yang digabung, tanpa berkas R2. Angka tersebut **bukan jumlah data Mac**. Utilitas di atas memerlukan kontainer target yang sudah tersedia untuk backup dan mengasumsikan adanya baris penugasan pada uji rollback; untuk Mac gunakan prosedur bertahap di atas yang memeriksa sumber terlebih dahulu. Snapshot menyimpan metadata internal Cloudflare sebagai arsip; tabel internal tersebut bukan bagian skema MariaDB aplikasi.
 
 Rincian pemeriksaan ada di [catatan migrasi](docs/mariadb-data-migration.md).
 

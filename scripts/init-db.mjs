@@ -55,7 +55,7 @@ try {
     await connection.beginTransaction();
     try {
       await connection.query("INSERT INTO units(id,code,name) VALUES(?,?,?)", [unitId, "INTERNAL", "Unit Internal"]);
-      await connection.query("INSERT INTO users(id,email,display_name,role,unit_id,password_hash,password_salt,password_changed_at) VALUES(?,?,?,'admin',?,?,?,?)", [randomUUID(), email, process.env.ADMIN_NAME ?? "Administrator SatuNilai", unitId, hash, salt, new Date().toISOString()]);
+      await connection.query("INSERT INTO users(id,email,display_name,role,unit_id,password_hash,password_salt,password_changed_at) VALUES(?,?,?,'admin',?,?,?,?)", [randomUUID(), email, process.env.ADMIN_NAME ?? "Administrator Lemari Digital", unitId, hash, salt, new Date().toISOString()]);
       await connection.commit();
     } catch (error) { await connection.rollback(); throw error; }
     console.log("Administrator awal dan unit internal dibuat.");

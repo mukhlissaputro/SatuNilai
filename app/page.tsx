@@ -607,7 +607,7 @@ export default function Home() {
       0,
     );
 
-  if (!authReady) return <div className="auth-loading">Memuat SatuNilai…</div>;
+  if (!authReady) return <div className="auth-loading">Memuat Lemari Digital…</div>;
   if (!sessionUser)
     return showAuth ? (
       <AuthScreen view={authView} setView={setAuthView} onBack={() => setShowAuth(false)} />
@@ -621,14 +621,14 @@ export default function Home() {
         <div className="brand">
           <span className="brand-mark satunilai-logo">
             <Image
-              src="/brand/satunilai-mark.png"
-              alt="Logo SatuNilai"
+              src="/brand/logo-lemari-digital-pbj.jpeg"
+              alt="Logo Lemari Digital"
               width={38}
               height={38}
             />
           </span>
           <div>
-            <strong>SatuNilai</strong>
+            <strong>Lemari Digital</strong>
             <small>Manajemen Penilaian</small>
           </div>
         </div>
@@ -708,13 +708,13 @@ export default function Home() {
           <div className="mobile-brand">
             <span className="brand-mark satunilai-logo">
               <Image
-                src="/brand/satunilai-mark.png"
-                alt="Logo SatuNilai"
+                src="/brand/logo-lemari-digital-pbj.jpeg"
+                alt="Logo Lemari Digital"
                 width={31}
                 height={31}
               />
             </span>
-            <strong>SatuNilai</strong>
+            <strong>Lemari Digital</strong>
           </div>
           <div className="top-actions">
             <span
@@ -1659,18 +1659,18 @@ function PublicDashboard({ onLogin }: { onLogin: () => void }) {
     <main className="public-dashboard">
       <header className="public-header">
         <div className="public-brand">
-          <Image src="/brand/satunilai-mark.png" alt="Logo SatuNilai" width={46} height={46} />
+          <Image src="/brand/logo-lemari-digital-pbj.jpeg" alt="Logo Lemari Digital" width={46} height={46} />
           <span className="public-brand-divider" aria-hidden="true" />
           <Image className="public-komnas-logo" src="/logo-komnas-ham.png" alt="Logo Komnas HAM RI" width={46} height={46} />
-          <div><strong>SatuNilai</strong><small>Dashboard Penilaian Publik</small></div>
+          <div><strong>Lemari Digital</strong><small>PENGADAAN BARANG/JASA KOMNAS HAM</small></div>
         </div>
         <button className="primary" onClick={onLogin}>Login</button>
       </header>
       <section className="public-hero">
         <div>
-          <span>PENILAIAN TERINTEGRASI</span>
-          <h1>Mengukur Kematangan, Menguatkan Tata Kelola, Mendorong Perbaikan Berkelanjutan.</h1>
-          <p>SatuNilai menyatukan hasil evaluasi transformasi digital, tata kelola pengadaan, keamanan siber, pengelolaan data, dan berbagai instrumen lainnya agar capaian instansi dapat dipantau secara terukur, transparan, dan akuntabel sebagai dasar peningkatan layanan publik yang berkelanjutan.</p>
+          <span>LEDI PBJ KOMNAS HAM</span>
+          <h1>Satu Platform, Satu Sumber Data, Satu Mekanisme Monitoring.</h1>
+          <p>Mewujudkan tata kelola Pengadaan Barang/Jasa yang transparan, akuntabel, dan berintegritas melalui Lemari Digital Pengadaan Barang/Jasa (LEDI PBJ) sebagai pusat pengelolaan data dukung, dokumentasi, verifikasi, dan pemantauan Indeks Tata Kelola Pengadaan (ITKP) serta pemenuhan bukti dukung maturitas UKPBJ secara terintegrasi.</p>
         </div>
         <div className="public-hero-image">
           <Image src="/illustrations/satunilai-assessment-ecosystem.png" alt="Ilustrasi ekosistem penilaian terintegrasi untuk transformasi digital, tata kelola, keamanan siber, dan data" width={1536} height={1152} priority />
@@ -1705,7 +1705,7 @@ function PublicDashboard({ onLogin }: { onLogin: () => void }) {
         </div>
         {selectedAssessment && <PublicAssessmentDetail assessment={selectedAssessment} history={selectedHistory} selectedPeriodId={selectedPeriodId} onSelectPeriod={setSelectedPeriodId} selectedPeriod={selectedPeriod} />}
       </section>
-      <footer className="public-footer"><span>© 2026 SatuNilai · Komisi Nasional Hak Asasi Manusia Republik Indonesia</span><a href="https://www.komnasham.go.id/" target="_blank" rel="noreferrer">komnasham.go.id</a></footer>
+      <footer className="public-footer"><span>@ 2026 LEDI PBJ – Komnas HAM</span><a href="https://www.komnasham.go.id/" target="_blank" rel="noreferrer">komnasham.go.id</a></footer>
     </main>
   );
 }
@@ -1859,12 +1859,12 @@ function AuthScreen({
           )}
           <div
             className="auth-logo-pair"
-            aria-label="SatuNilai dan Komnas HAM RI"
+            aria-label="Lemari Digital dan Komnas HAM RI"
           >
             <span className="auth-icon satunilai-logo">
               <Image
-                src="/brand/satunilai-mark.png"
-                alt="Logo SatuNilai"
+                src="/brand/logo-lemari-digital-pbj.jpeg"
+                alt="Logo Lemari Digital"
                 width={58}
                 height={58}
               />
@@ -1881,7 +1881,7 @@ function AuthScreen({
           </div>
           <h2>
             {view === "login"
-              ? "Masuk ke SatuNilai"
+              ? "Masuk ke LEDI PBJ"
               : view === "forgot"
                 ? "Lupa password"
                 : "Buat password baru"}
@@ -2259,7 +2259,7 @@ function ModulePage({
         <div className="report-grid">
           <section className="panel report-preview">
             <div className="report-cover">
-              <span>SATUNILAI</span>
+              <span>Lemari Digital</span>
               <h2>Laporan Penilaian SPBE</h2>
               <p>Tahun 2025 · Dinas Komunikasi dan Informatika</p>
               <strong>
@@ -3163,7 +3163,7 @@ function ReportsWorkspace() {
         <div className="report-grid">
           <section className="panel report-preview">
             <div className="report-cover">
-              <span>SATUNILAI · KOMNAS HAM RI</span>
+              <span>Lemari Digital · KOMNAS HAM RI</span>
               <h2>Laporan Penilaian {String(selectedType?.code)}</h2>
               <p>
                 Tahun {String(selectedPeriod?.year)} ·{" "}

@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       ]);
       if (runtime.RESEND_API_KEY && runtime.MAIL_FROM) {
         const resetUrl = `${new URL(request.url).origin}/?reset=${encodeURIComponent(token)}`;
-        await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: runtime.MAIL_FROM, to: [email], subject: "Reset password SatuNilai", text: `Halo ${user.name},\n\nGunakan tautan berikut untuk membuat password baru. Tautan berlaku 30 menit.\n\n${resetUrl}\n\nAbaikan email ini jika Anda tidak meminta reset.` }) });
+        await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: runtime.MAIL_FROM, to: [email], subject: "Reset password Lemari Digital", text: `Halo ${user.name},\n\nGunakan tautan berikut untuk membuat password baru. Tautan berlaku 30 menit.\n\n${resetUrl}\n\nAbaikan email ini jika Anda tidak meminta reset.` }) });
       }
     }
     return Response.json({ message: "Jika email terdaftar, tautan reset akan dikirim." });
