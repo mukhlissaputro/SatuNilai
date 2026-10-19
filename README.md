@@ -2,6 +2,8 @@
 
 Aplikasi pengelolaan data dukung Pengadaan Barang/Jasa, pemantauan ITKP, dan pemenuhan bukti maturitas UKPBJ. Mendukung instrumen berversi, hak akses, penilaian mandiri, verifikasi, bukti privat, finalisasi, notifikasi, dan laporan.
 
+Semua perubahan aktif tersedia pada branch `main`. Gunakan branch ini di Windows, Mac, dan VM; branch integrasi terdahulu sudah digabung.
+
 ## Menjalankan dengan Docker Desktop
 
 Aktifkan Docker Desktop dengan Linux containers, kemudian jalankan dari direktori proyek:
@@ -92,7 +94,7 @@ Pastikan `git status` bersih. Simpan perubahan kode lokal sebelum penggabungan. 
 
 ```sh
 git fetch origin
-git merge --ff-only origin/codex/local-mac-integration
+git merge --ff-only origin/main
 npm ci
 ```
 

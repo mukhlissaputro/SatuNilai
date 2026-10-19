@@ -1,5 +1,7 @@
 # Menggabungkan perubahan Mac dengan Docker dan MariaDB
 
+Hasil integrasi dan perubahan branding terbaru sudah disatukan pada `main`. Nama branch di catatan riwayat berikut adalah branch pekerjaan terdahulu; untuk mengambil versi aktif gunakan `origin/main`.
+
 Branch `codex/integrasi-mac-mariadb` menggabungkan `origin/main` pada commit `aadc729` dengan `codex/mariadb-docker` pada `407e6a6`. Fitur dashboard publik, visibilitas jenis penilaian, duplikasi kategori, pencarian/nama bukti, dan favorit dipertahankan. Pilihan akun lokal development tetap tersedia dari halaman Login.
 
 Konflik halaman diselesaikan dengan mempertahankan dashboard publik dan tampilan reset password, tanpa menjalankan bootstrap database melalui HTTP. Skema memakai MySQL/MariaDB, termasuk `is_public` dan tabel `evidence_favorites`. Migrasi 0002 menambahkan fitur tersebut tanpa menulis ulang migrasi yang sudah diterapkan. API baru menggunakan runtime Node dan sintaks MariaDB. Duplikasi struktur memakai ID deterministik dengan panjang terbatas agar relasi hasil salinan tetap valid.
@@ -11,7 +13,7 @@ Untuk kondisi merge gagal yang dimulai dari working tree bersih pada branch `int
 ```sh
 git merge --abort
 git fetch origin
-git merge --ff-only origin/codex/integrasi-mac-mariadb
+git merge --ff-only origin/main
 git status
 ```
 
