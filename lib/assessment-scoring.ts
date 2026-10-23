@@ -23,6 +23,18 @@ export function validateScore(value: unknown, maximum: number) {
   if (!Number.isFinite(number) || number < 0 || number > maximum) throw new Error(`Nilai harus berada antara 0 dan ${maximum}`);
   return number;
 }
+export function prepareFinalPoints(subcategories: {id:string;maximum:number;name?:string}[], input: unknown) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Nilai final setiap subkategori wajib diisi');
+  const source=input as Record<string,unknown>;
+  const values: Record<string,number>={};
+  let total=0;
+  for (const subcategory of subcategories) {
+    try { values[subcategory.id]=validateScore(source[subcategory.id],subcategory.maximum); }
+    catch (error) { throw new Error(`${subcategory.name ?? subcategory.id}: ${(error as Error).message}`); }
+    total+=values[subcategory.id];
+  }
+  return {values,total};
+}
 const finite = (value: unknown): value is number => value != null && Number.isFinite(Number(value));
 const average = (values: (number | null | undefined)[]) => {
   const valid = values.filter(finite).map(Number);
@@ -46,10 +58,10 @@ export function aggregateAssessment(rows: ScoreRow[], mode: ScoringMode, periodM
     const maximum = mode === 'direct_points' ? sum(indicators.map(row => row.maximum)) : periodMaximum;
     const internal = mode === 'direct_points' ? sum(indicators.map(row => row.internal)) : average(indicators.map(row => row.internal));
     const verified = mode === 'direct_points' ? sum(indicators.map(row => row.verified)) : average(indicators.map(row => row.verified));
-    // Direct mode always uses indicator finals; legacy mode retains the assessor's subcategory value.
-    const final = mode === 'direct_points'
+    // An assessor subtotal is authoritative; indicator finals support historical records only.
+    const final = first.finalValue != null ? Number(first.finalValue) : mode === 'direct_points'
       ? (indicators.some(row => row.final != null) ? sum(indicators.map(row => row.final)) : null)
-      : first.finalValue == null ? average(indicators.map(row => row.final)) : Number(first.finalValue);
+      : average(indicators.map(row => row.final));
     return { id, categoryId: first.categoryId, weight: Number(first.subcategoryWeight ?? 0), categoryWeight: Number(first.categoryWeight ?? 0), maximum, internal, verified, accepted: indicators.filter(row => row.accepted).length, rejected: indicators.filter(row => row.rejected).length, final, target: first.targetValue == null ? null : Number(first.targetValue), total: indicators.length, completed: indicators.filter(row => row.internal != null).length };
   });
   const categories = [...new Set(rows.map(row => row.categoryId))].map(id => {

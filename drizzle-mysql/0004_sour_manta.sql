@@ -1,0 +1,3 @@
+ALTER TABLE `assessment_periods` ADD `interpretation_rules` text;
+--> statement-breakpoint
+UPDATE assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id SET p.interpretation_rules='[{"minimum":0,"predicate":"D","interpretation":"Sangat Kurang"},{"minimum":30,"predicate":"C","interpretation":"Kurang"},{"minimum":50,"predicate":"CC","interpretation":"Cukup"},{"minimum":60,"predicate":"B","interpretation":"Baik"},{"minimum":70,"predicate":"BB","interpretation":"Sangat Baik"},{"minimum":80,"predicate":"A","interpretation":"Memuaskan"},{"minimum":90,"predicate":"AA","interpretation":"Sangat Memuaskan"}]' WHERE t.code='ITKP' AND p.year=2026 AND p.max_score=100 AND p.status<>'finalized' AND p.interpretation_rules IS NULL;

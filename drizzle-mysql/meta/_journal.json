@@ -29,6 +29,20 @@
       "when": 1792740554309,
       "tag": "0003_flexible_scoring",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1792784008662,
+      "tag": "0004_sour_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1792784521055,
+      "tag": "0005_seed_itkp_2026_interpretation",
+      "breakpoints": true
     }
   ]
 }

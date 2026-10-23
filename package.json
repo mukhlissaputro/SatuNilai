@@ -19,7 +19,7 @@
     "db:import:legacy": "node scripts/migrate-legacy.mjs",
     "dev:docker": "docker compose -f compose.yaml -f compose.dev.yaml up -d --build --wait",
     "test:unit": "node --test tests/legacy-export.test.mjs tests/sql-identifiers.test.mjs",
-    "test:scoring": "node --experimental-strip-types --test tests/assessment-scoring.test.mjs",
+    "test:scoring": "node --experimental-strip-types --test tests/assessment-scoring.test.mjs tests/score-interpretation.test.mjs",
     "test:scoring:integration": "npm run build && node --env-file=.env scripts/test-flexible-scoring.mjs"
   },
   "dependencies": {

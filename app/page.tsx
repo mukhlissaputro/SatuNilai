@@ -11,6 +11,10 @@ import {
   useState,
 } from "react";
 import Image from "next/image";
+import { ScoreSummary, FinalInterpretation, InterpretationText, type ScoreComparison } from "./components/score-interpretation";
+import { InterpretationManager } from "./components/interpretation-manager";
+import type { InterpretationBand } from "../lib/score-interpretation";
+import { prepareFinalPoints } from "../lib/assessment-scoring";
 
 type Evidence = { name: string; size: string };
 type Indicator = {
@@ -243,6 +247,7 @@ function NavIcon({ name }: { name: string }) {
         <circle cx="18" cy="12" r="2" />
       </>
     ),
+    "Interpretasi Nilai": (<><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5" /></>),
     "Pengguna & Akses": (
       <>
         <circle cx="9" cy="8" r="4" />
@@ -668,6 +673,7 @@ export default function Home() {
               "Jenis Penilaian",
               "Tahun Penilaian",
               "Kategori Indikator",
+              "Interpretasi Nilai",
               "Pengguna & Akses",
             ].map((item) => (
               <button
@@ -1332,7 +1338,7 @@ export default function Home() {
         </div>
       </section>
       {toast && (
-        <div className="toast">
+        <div className="toast" role="status" aria-live="polite">
           <span>✓</span>
           {toast}
         </div>
@@ -1342,6 +1348,7 @@ export default function Home() {
 }
 
 type DashboardData = {
+  comparison?: ScoreComparison;
   types: Array<Record<string, unknown>>;
   periods: Array<Record<string, unknown>>;
   period?: Record<string, unknown> | null;
@@ -1392,6 +1399,7 @@ function DashboardWorkspace({
     0,
   );
   const finalScore =
+    data.comparison?.finalized && data.comparison.final != null ? data.comparison.final :
     data.period?.scoringMode === 'direct_points'
       ? data.categories.reduce((sum, category) => sum + Number(category.score ?? 0), 0)
       : totalWeight > 0
@@ -1465,12 +1473,13 @@ function DashboardWorkspace({
         </label>
         {data.period && (
           <div className="final-score">
-            <span>Nilai {data.period.scoringMode === 'direct_points' ? 'terverifikasi ' : ''}{String(data.period.assessmentCode)}</span>
+            <span>Nilai {data.comparison?.finalized ? 'akhir ' : data.period.scoringMode === 'direct_points' ? 'terverifikasi ' : ''}{String(data.period.assessmentCode)}</span>
             <strong>{finalScore.toFixed(2).replace(".", ",")}</strong>
             <b className="badge green">{String(data.period.status)}</b>
           </div>
         )}
       </div>
+      {!loading && data.period && <ScoreSummary data={data.comparison}/>}
       {!periodId ? (
         <section className="panel dashboard-empty">
           <span>⌁</span>
@@ -1698,7 +1707,7 @@ function PublicDashboard({ onLogin }: { onLogin: () => void }) {
             return <button type="button" className={`public-assessment-card ${active ? "selected" : ""}`} key={String(assessment.id)} onClick={() => { setSelectedAssessmentId(active ? "" : String(assessment.id)); setSelectedPeriodId(""); }} aria-expanded={active}>
               <div className="public-card-top"><span>{String(assessment.code)}</span><em className="final">Final</em></div>
               <h3>{String(assessment.name)}</h3><p>{String(assessment.description || "Ringkasan hasil penilaian periode terbaru.")}</p>
-              <div className="public-score"><strong>{score == null ? "—" : score.toFixed(2).replace(".", ",")}</strong><span>dari {max || "—"}<small>{String(period?.scoreKind ?? "belum tersedia")}</small></span></div>
+              <InterpretationText band={period?.interpretation as InterpretationBand | null}/><div className="public-score"><strong>{score == null ? "—" : score.toFixed(2).replace(".", ",")}</strong><span>dari {max || "—"}<small>{String(period?.scoreKind ?? "belum tersedia")}</small></span></div>
               <div className="public-progress"><i style={{ width: `${percentage}%` }} /></div>
               <div className="public-card-meta"><span>Periode terbaru <b>{String(period?.year ?? "—")}</b></span><span><b>{history.length}</b> tahun final</span></div>
               <span className="public-card-cta">{active ? "Tutup statistik" : "Lihat statistik tahunan"} <b>→</b></span>
@@ -1740,6 +1749,7 @@ function PublicAssessmentDetail({ assessment, history, selectedPeriodId, onSelec
     {!selectedPeriod && <div className="year-hint">Pilih salah satu tahun pada grafik untuk membuka rincian kategori.</div>}
     {selectedPeriod && <div className="public-category-reveal">
       <header><div><span>PEMENUHAN KATEGORI</span><h3>{String(assessment.code)} Tahun {String(selectedPeriod.year)}</h3></div><strong>{Number(selectedPeriod.score ?? 0).toFixed(2).replace(".", ",")}<small>dari {String(selectedPeriod.maxScore)}</small></strong></header>
+      <InterpretationText band={selectedPeriod.interpretation as InterpretationBand | null}/>
       <div className="public-category-list">{((selectedPeriod.categories as Array<Record<string, unknown>> | undefined) ?? []).map((category, index) => { const value = Number(category.final ?? 0); const max = Math.max(1, Number(selectedPeriod.scoringMode === "direct_points" ? category.maximum ?? category.weight : selectedPeriod.maxScore ?? 1)); return <article key={String(category.id)} style={{ "--delay": `${index * 70}ms` } as React.CSSProperties}><span>{String(category.code)}</span><div><strong>{String(category.name)}</strong><div><i style={{ width: `${Math.min(100, value / max * 100)}%` }} /></div><small>{selectedPeriod.scoringMode === "direct_points" ? "Maksimum" : "Bobot"} {Number(category.weight ?? 0)}{selectedPeriod.scoringMode === "direct_points" ? " poin" : "%"}</small></div><b>{value.toFixed(2).replace(".", ",")}</b></article>; })}</div>
     </div>}
   </section>;
@@ -2030,6 +2040,7 @@ function ModulePage({
   const assessmentWorkspaceRef = useRef<{ openFinalize: () => void } | null>(
     null,
   );
+  const interpretationManagerRef = useRef<{ openAdd: () => void } | null>(null);
   const structureManagerRef = useRef<{ openCategory: () => void } | null>(null);
   const evidenceRepositoryRef = useRef<{ openCreate: () => void } | null>(null);
   const configs: Record<
@@ -2066,6 +2077,7 @@ function ModulePage({
       desc: "Kelola SPBE, Indeks SDI, EPSS, ITKP, dan instrumen lainnya.",
       action: "Tambah Jenis",
     },
+    "Interpretasi Nilai": {eyebrow:"INSTRUMEN BERVERSI",title:"Interpretasi Nilai",desc:"Kelola rentang nilai, predikat, dan interpretasi setiap jenis dan tahun penilaian.",action:"Tambah Interpretasi"},
     "Kategori Indikator": {
       eyebrow: "INSTRUMEN BERVERSI",
       title: "Kategori Indikator",
@@ -2231,6 +2243,8 @@ function ModulePage({
                   ? assessmentWorkspaceRef.current?.openFinalize()
                   : active === "Bukti Dukung"
                     ? evidenceRepositoryRef.current?.openCreate()
+                    : active === "Interpretasi Nilai"
+                      ? interpretationManagerRef.current?.openAdd()
                     : active === "Kategori Indikator"
                       ? structureManagerRef.current?.openCategory()
                       : resource && resource !== "evidence"
@@ -2364,6 +2378,7 @@ function ModulePage({
           ))}
         </div>
       )}
+      {active === "Interpretasi Nilai" && <InterpretationManager ref={interpretationManagerRef} types={adminData.types} periods={adminData.periods} flash={flash}/>}
       {active === "Kategori Indikator" && (
         <StructureManager
           ref={structureManagerRef}
@@ -2730,6 +2745,7 @@ function ModulePage({
 }
 
 type WorkspaceData = {
+  comparison?: ScoreComparison;
   types: Array<Record<string, unknown>>;
   periods: Array<Record<string, unknown>>;
   selectedPeriod?: Record<string, unknown>;
@@ -3439,7 +3455,10 @@ const AssessmentWorkspace = forwardRef<
       )
     : undefined;
   const weightedFinalScore = (() => {
-    if (directPoints) return data.subcategories.reduce((sum, subcategory) => sum + Number(subcategory.verifiedScore ?? 0), 0);
+    if (directPoints) {
+      try { return prepareFinalPoints(data.subcategories.map(row=>({id:String(row.id),maximum:Number(row.maxValue ?? 0)})),finalValues).total; }
+      catch { return null; }
+    }
     const entered = data.subcategories.filter((subcategory) => {
       const raw = finalValues[String(subcategory.id)];
       return raw !== "" && Number.isFinite(Number(raw));
@@ -3554,19 +3573,24 @@ const AssessmentWorkspace = forwardRef<
           Object.fromEntries(
             data.subcategories.map((row) => [
               String(row.id),
-              row.finalValue == null ? "" : String(row.finalValue),
+              row.finalValue == null ? (data.selectedPeriod?.scoringMode === 'direct_points' ? String(row.verifiedScore ?? 0) : '') : String(row.finalValue),
             ]),
           ),
         );
         setShowFinalize(true);
       },
     }),
-    [data.selectedPeriod?.status, data.subcategories, flash, periodId],
+    [data.selectedPeriod?.status, data.selectedPeriod?.scoringMode, data.subcategories, flash, periodId],
   );
   const finalizePeriod = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (directPoints && weightedFinalScore == null) {
+      flash('Isi nilai asesor setiap subkategori sesuai batas maksimumnya');
+      return;
+    }
     setSaving(true);
-    const response = await fetch("/api/assessment-workspace", {
+    try {
+      const response = await fetch("/api/assessment-workspace", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3580,17 +3604,26 @@ const AssessmentWorkspace = forwardRef<
         ),
       }),
     });
-    const result = (await response.json().catch(() => ({}))) as {
+      const result = (await response.json().catch(() => ({}))) as {
       error?: string;
+      finalized?: boolean;
     };
-    setSaving(false);
     if (!response.ok) {
       flash(result.error ?? "Periode belum dapat difinalisasi");
+      return;
+    }
+    if (!result.finalized) {
+      flash('Server belum mengonfirmasi finalisasi. Muat ulang penilaian untuk memeriksa status sebelum mencoba lagi.');
       return;
     }
     setShowFinalize(false);
     await load(periodId);
     flash("Nilai asesor tersimpan dan periode berhasil difinalisasi");
+    } catch {
+      flash('Koneksi terputus saat finalisasi. Muat ulang penilaian untuk memeriksa status sebelum mencoba lagi.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!data.types.length)
@@ -3645,6 +3678,7 @@ const AssessmentWorkspace = forwardRef<
           {String(data.selectedPeriod?.status ?? "-")}
         </span>
       </section>
+      <ScoreSummary data={data.comparison}/>
       <section className="panel assessment-subcategories">
         <div className="panel-head">
           <div>
@@ -4116,13 +4150,15 @@ const AssessmentWorkspace = forwardRef<
               </strong>
               <small>
                 {String(data.selectedPeriod?.typeCode ?? "Penilaian")} · Tahun{" "}
-                {String(data.selectedPeriod?.year ?? "-")} · {directPoints ? "Poin indikator dijumlahkan tanpa dikalikan bobot lagi" : "Nilai subkategori dihitung dalam kategori, kemudian dikalikan bobot kategori utama"}
+                {String(data.selectedPeriod?.year ?? "-")} · {directPoints ? "Nilai asesor per subkategori dijumlahkan tanpa dikalikan bobot lagi" : "Nilai subkategori dihitung dalam kategori, kemudian dikalikan bobot kategori utama"}
               </small>
             </section>
+            <FinalInterpretation value={weightedFinalScore} data={data.comparison}/>
             <p className="finalize-warning">
               Finalisasi hanya berhasil jika seluruh indikator memiliki bukti
               yang telah diterima admin. Setelah final, periode terkunci dan
               tidak dapat diubah.
+              {directPoints && ' Nilai awal mengikuti capaian terverifikasi; sesuaikan nilai asesor sebelum menyimpan. Nilai mandiri tetap dipertahankan.'}
             </p>
             {data.subcategories.map((subcategory) => (
               <label className="final-value-field" key={String(subcategory.id)}>
@@ -4131,17 +4167,16 @@ const AssessmentWorkspace = forwardRef<
                     {String(subcategory.code)} · {String(subcategory.name)}
                   </strong>
                   <small>
-                    Kategori utama: {String(subcategory.categoryName)} · {directPoints ? `Maksimum subkategori ${Number(subcategory.maxValue ?? 0)} poin. Nilai final berasal dari indikator yang diterima, dirata-rata antarunit bila ada beberapa unit.` : `Bobot kategori ${Number(subcategory.categoryWeight ?? 0)}%; Bobot subkategori dalam kategori: ${Number(subcategory.weight ?? 0)}%`}
+                    Kategori utama: {String(subcategory.categoryName)} · {directPoints ? `Maksimum ${Number(subcategory.maxValue ?? 0)} poin · Terverifikasi ${Number(subcategory.verifiedScore ?? 0).toLocaleString('id-ID')}. Nilai asesor dapat disesuaikan sebelum finalisasi.` : `Bobot kategori ${Number(subcategory.categoryWeight ?? 0)}%; Bobot subkategori dalam kategori: ${Number(subcategory.weight ?? 0)}%`}
                   </small>
                 </span>
                 <input
                   type="number"
                   min="0"
                   max={directPoints ? Number(subcategory.maxValue ?? 0) : periodMaxScore}
-                  readOnly={directPoints}
-                  step="0.01"
+                  step={directPoints ? 'any' : '0.01'}
                   required
-                  value={directPoints ? Number(subcategory.verifiedScore ?? 0) : finalValues[String(subcategory.id)] ?? ""}
+                  value={finalValues[String(subcategory.id)] ?? ""}
                   onChange={(event) =>
                     setFinalValues({
                       ...finalValues,

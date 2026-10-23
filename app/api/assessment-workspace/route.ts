@@ -1,6 +1,6 @@
 import { env } from "../../../server/runtime";
 import { readAssessment } from "../../../server/assessment-scoring";
-import { indicatorMaximum, scoringMode, validateScore } from "../../../lib/assessment-scoring";
+import { indicatorMaximum, scoringMode, validateScore, prepareFinalPoints } from "../../../lib/assessment-scoring";
 import {
   ApiError,
   apiError,
@@ -30,6 +30,7 @@ async function assertTypeAccess(
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
+    if (user.role === 'staff' && !user.unitId) throw new ApiError(409, "Akun staf belum memiliki unit penilaian");
     const db = (env as unknown as WorkspaceEnv).DB;
     const typeSql =
       user.role !== "admin"
@@ -96,6 +97,8 @@ export async function GET(request: Request) {
       .bind(selected.id, unit.id, selected.instrumentVersionId)
       .all();
     const summary = await readAssessment(String(selected.id), user.role === 'admin' && selected.scoringMode === 'direct_points' ? null : unit.id);
+    const globalComparison = (await readAssessment(String(selected.id))).comparison;
+    const comparison = user.role === 'staff' ? {...summary.comparison,final:globalComparison.final,finalInterpretation:globalComparison.finalInterpretation} : globalComparison;
     const indicatorRows = indicatorResult.results.map(row => ({ ...row, maxValue: summary.rows.find(item => item.indicatorId === row.id)?.maxValue ?? null }));
     const subcategoryRows = subcategoryResult.results.map(row => {
       const totals = summary.subcategories.find(item => item.id === row.id);
@@ -106,6 +109,7 @@ export async function GET(request: Request) {
         types: typeResult.results,
         periods: periods.results,
         selectedPeriod: selected,
+        comparison,
         subcategories: subcategoryRows,
         indicators: indicatorRows,
         user: { role: user.role },
@@ -242,17 +246,22 @@ export async function PATCH(request: Request) {
       if (period.status === "finalized") throw new ApiError(409, "Periode sudah difinalisasi");
       const readiness = await db.prepare("SELECT COUNT(DISTINCT i.id) AS total,COUNT(DISTINCT CASE WHEN s.status='approved' AND EXISTS(SELECT 1 FROM evidence_links el WHERE el.score_id=s.id) THEN i.id END) AS approved FROM categories c JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=? WHERE c.instrument_version_id=?").bind(periodId, period.versionId).first<{ total: number; approved: number }>();
       if (!readiness || Number(readiness.total) === 0 || Number(readiness.approved) !== Number(readiness.total)) throw new ApiError(409, "Seluruh indikator harus memiliki bukti yang diterima admin sebelum finalisasi");
-      const subcategories = await db.prepare("SELECT sc.id FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=? ORDER BY sc.sort_order").bind(period.versionId).all();
+      const subcategories = await db.prepare("SELECT sc.id,sc.name FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=? ORDER BY sc.sort_order").bind(period.versionId).all();
       const updates: PreparedStatement[] = [];
       const summary = await readAssessment(periodId);
       if (period.scoringMode === 'direct_points' && Math.abs(summary.maximum - period.maxScore) > 0.000001) throw new ApiError(409, 'Jumlah nilai maksimal indikator harus sama dengan nilai maksimal periode');
       if (period.scoringMode === 'direct_points') {
+        if (summary.accepted !== summary.total) throw new ApiError(409, "Seluruh indikator harus diterima dan memiliki bukti aktif sebelum finalisasi");
         const invalid = await db.prepare('SELECT COUNT(*) AS total FROM indicator_scores s JOIN indicators i ON i.id=s.indicator_id WHERE s.period_id=? AND (s.internal_value IS NULL OR s.internal_value<0 OR i.max_value IS NULL OR s.internal_value>i.max_value OR s.status<>?)').bind(periodId, 'approved').first<{total:number}>();
         if (Number(invalid?.total ?? 0)) throw new ApiError(409, 'Seluruh nilai indikator harus valid dan diterima sebelum finalisasi');
-        updates.push(db.prepare('UPDATE indicator_scores SET assessor_value=internal_value WHERE period_id=?').bind(periodId));
+      }
+      let assessorValues: Record<string,number> | null=null;
+      if (period.scoringMode === 'direct_points') {
+        try { assessorValues=prepareFinalPoints(summary.subcategories.map(item=>({id:item.id,maximum:item.maximum,name:String(subcategories.results.find(row=>row.id===item.id)?.name ?? item.id)})),finalValues).values; }
+        catch (error) { throw new ApiError(400,(error as Error).message); }
       }
       for (const row of subcategories.results) {
-        const value = period.scoringMode === 'direct_points' ? Number(summary.subcategories.find(item => item.id === row.id)?.internal ?? 0) : Number(finalValues[String(row.id)]);
+        const value = assessorValues ? assessorValues[String(row.id)] : Number(finalValues[String(row.id)]);
         if (!Number.isFinite(value) || value < 0 || value > period.maxScore) throw new ApiError(400, `Nilai final setiap subkategori wajib diisi antara 0 dan ${period.maxScore}`);
         updates.push(db.prepare("UPDATE subcategories SET final_value=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(value, String(row.id)));
       }

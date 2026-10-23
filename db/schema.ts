@@ -122,6 +122,7 @@ export const assessmentPeriods = mysqlTable("assessment_periods", {
   year: int("year").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   maxScore: double("max_score").notNull().default(5),
+  interpretationRules: mysqlText("interpretation_rules"),
   scoringMode: varchar("scoring_mode", { length: 32, enum: ["weighted_average", "direct_points"] }).notNull().default("weighted_average"),
   startsAt: varchar("starts_at", { length: 255 }).notNull(),
   dueAt: varchar("due_at", { length: 255 }).notNull(),

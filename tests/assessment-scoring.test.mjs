@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aggregateAssessment, validateScore, indicatorMaximum } from '../lib/assessment-scoring.ts';
+import { aggregateAssessment, validateScore, indicatorMaximum, prepareFinalPoints } from '../lib/assessment-scoring.ts';
 
 const maxima = [5, 2.5, 2.5, 10, 2.5, 2.5, 5, 15, 9, 6, 30, 10];
 const fixture = () => maxima.map((maximum, index) => ({
@@ -60,4 +60,23 @@ test('verification across units does not remove rejected units from the denomina
   const base={indicatorId:'i',subcategoryId:'s',categoryId:'c',maxValue:5,internalValue:5,evidenceCount:1};
   const summary=aggregateAssessment([{...base,status:'approved'},{...base,status:'rejected'}],'direct_points',100);
   assert.equal(summary.internal,5);assert.equal(summary.verified,2.5);assert.equal(summary.accepted,0);
+});
+
+test('assessor finals are editable subtotal points, bounded individually, with a simple total', () => {
+  const subcategories=[10,20,15,9,6,30,10].map((maximum,index)=>({id:`s${index}`,maximum}));
+  const values=Object.fromEntries([8,18,10,8,2,20,4].map((value,index)=>[`s${index}`,value]));
+  assert.equal(prepareFinalPoints(subcategories,values).total,70);
+  for(const invalid of [undefined,null,'',false,NaN,Infinity,-1,6.01]) {
+    assert.throws(()=>prepareFinalPoints(subcategories,{...values,s4:invalid}));
+  }
+  assert.throws(()=>prepareFinalPoints(subcategories,{}));
+  assert.throws(()=>prepareFinalPoints(subcategories,[]));
+  assert.equal(prepareFinalPoints(subcategories,{...values,s4:0}).values.s4,0);
+  assert.equal(prepareFinalPoints(subcategories,{...values,s4:5/3}).values.s4,5/3);
+});
+
+test('stored assessor subtotal overrides indicator-derived final without altering staff/verified points', () => {
+  const rows=[5,2.5,2.5].map((value,index)=>({indicatorId:`i${index}`,subcategoryId:'plan',categoryId:'system',maxValue:value,internalValue:value,assessorValue:value,finalValue:8,status:'locked',evidenceCount:1}));
+  const summary=aggregateAssessment(rows,'direct_points',100);
+  assert.equal(summary.internal,10);assert.equal(summary.verified,10);assert.equal(summary.final,8);
 });

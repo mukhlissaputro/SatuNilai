@@ -11,6 +11,7 @@ type DashboardEnv = { DB: LocalDatabase };
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
+    if (user.role === 'staff' && !user.unitId) throw new ApiError(409, "Akun staf belum memiliki unit penilaian");
     const periodId = new URL(request.url).searchParams.get("periodId") ?? "";
     const binding = (env as unknown as DashboardEnv).DB;
     const accessJoin = user.role === "admin" ? "" : "JOIN user_assessment_types uat ON uat.assessment_type_id=t.id AND uat.user_id=?";
@@ -28,6 +29,8 @@ export async function GET(request: Request) {
     const metrics = await binding.prepare(`SELECT COUNT(DISTINCT i.id) AS totalIndicators,COUNT(DISTINCT CASE WHEN s.internal_value IS NOT NULL THEN i.id END) AS assessedIndicators,COUNT(DISTINCT CASE WHEN el.id IS NOT NULL THEN i.id END) AS indicatorsWithEvidence,COUNT(DISTINCT c.id) AS totalCategories,COUNT(DISTINCT sc.id) AS totalSubcategories,COALESCE(AVG(DISTINCT sc.target_value),0) AS targetValue,COALESCE(AVG(s.internal_value),0) AS currentValue FROM categories c LEFT JOIN subcategories sc ON sc.category_id=c.id LEFT JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=? ${scoreUnitFilter} LEFT JOIN evidence_links el ON el.score_id=s.id WHERE c.instrument_version_id=?`).bind(...scoreArgs, String(period.versionId)).first();
     const history = await binding.prepare(`SELECT p.year,COALESCE(SUM(categoryScore.score*categoryScore.weight)/NULLIF(SUM(categoryScore.weight),0),0) AS value FROM assessment_periods p LEFT JOIN (SELECT p2.id AS periodId,c.id,c.weight_percent AS weight,COALESCE(AVG(s.internal_value),0) AS score FROM assessment_periods p2 JOIN categories c ON c.instrument_version_id=p2.instrument_version_id LEFT JOIN subcategories sc ON sc.category_id=c.id LEFT JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=p2.id ${user.role === "staff" && user.unitId ? "AND s.unit_id=?" : ""} GROUP BY p2.id,c.id) categoryScore ON categoryScore.periodId=p.id WHERE p.assessment_type_id=? AND p.year<=? GROUP BY p.id ORDER BY p.year`).bind(...(user.role === "staff" && user.unitId ? [user.unitId, String(period.typeId), Number(period.year)] : [String(period.typeId), Number(period.year)])).all();
     const summary = await readAssessment(periodId, user.role === 'staff' ? user.unitId : null);
+    const globalComparison = summary.period.status === 'finalized' && user.role === 'staff' ? (await readAssessment(periodId)).comparison : summary.comparison;
+    const comparison = {...summary.comparison, final:globalComparison.final, finalInterpretation:globalComparison.finalInterpretation};
     period.scoringMode = summary.period.scoringMode;
     if (summary.period.scoringMode === 'direct_points') {
       for (const row of categoryResult.results) {
@@ -43,9 +46,9 @@ export async function GET(request: Request) {
     for (const past of pastPeriods.results.filter(item => item.mode === 'direct_points')) {
       const totals = await readAssessment(String(past.id), user.role === 'staff' ? user.unitId : null);
       const point = history.results.find(item => Number(item.year) === Number(past.year));
-      if (point) point.value = totals.verified ?? 0;
+      if (point) point.value = totals.period.status === 'finalized' ? totals.final ?? 0 : totals.verified ?? 0;
     }
-    return Response.json({ types: typeRows.results, periods: periodRows.results, period, categories: categoryResult.results, indicators: [], metrics, history: history.results }, { headers: { "Cache-Control": "private, no-store" } });
+    return Response.json({ types: typeRows.results, periods: periodRows.results, period, comparison, categories: categoryResult.results, indicators: [], metrics, history: history.results }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiError(error); }
 }
 
