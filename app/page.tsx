@@ -1392,7 +1392,9 @@ function DashboardWorkspace({
     0,
   );
   const finalScore =
-    totalWeight > 0
+    data.period?.scoringMode === 'direct_points'
+      ? data.categories.reduce((sum, category) => sum + Number(category.score ?? 0), 0)
+      : totalWeight > 0
       ? data.categories.reduce(
           (sum, category) =>
             sum + Number(category.score ?? 0) * Number(category.weight ?? 0),
@@ -1581,7 +1583,7 @@ function DashboardWorkspace({
             <div className="category-list">
               <div className="weight-header">
                 <span>Kategori & progres</span>
-                <span>Bobot</span>
+                <span>{data.period?.scoringMode === 'direct_points' ? 'Maksimum' : 'Bobot'}</span>
                 <span>Nilai</span>
                 <span>Bukti</span>
               </div>
@@ -1609,7 +1611,7 @@ function DashboardWorkspace({
                         />
                       </div>
                     </div>
-                    <strong>{Number(category.weight ?? 0)}%</strong>
+                    <strong>{Number(category.weight ?? 0)}{data.period?.scoringMode === 'direct_points' ? ' poin' : '%'}</strong>
                     <div className="cat-score">
                       <strong>
                         {Number(category.score ?? 0)
@@ -1738,7 +1740,7 @@ function PublicAssessmentDetail({ assessment, history, selectedPeriodId, onSelec
     {!selectedPeriod && <div className="year-hint">Pilih salah satu tahun pada grafik untuk membuka rincian kategori.</div>}
     {selectedPeriod && <div className="public-category-reveal">
       <header><div><span>PEMENUHAN KATEGORI</span><h3>{String(assessment.code)} Tahun {String(selectedPeriod.year)}</h3></div><strong>{Number(selectedPeriod.score ?? 0).toFixed(2).replace(".", ",")}<small>dari {String(selectedPeriod.maxScore)}</small></strong></header>
-      <div className="public-category-list">{((selectedPeriod.categories as Array<Record<string, unknown>> | undefined) ?? []).map((category, index) => { const value = Number(category.final ?? 0); const max = Math.max(1, Number(selectedPeriod.maxScore ?? 1)); return <article key={String(category.id)} style={{ "--delay": `${index * 70}ms` } as React.CSSProperties}><span>{String(category.code)}</span><div><strong>{String(category.name)}</strong><div><i style={{ width: `${Math.min(100, value / max * 100)}%` }} /></div><small>Bobot {Number(category.weight ?? 0)}%</small></div><b>{value.toFixed(2).replace(".", ",")}</b></article>; })}</div>
+      <div className="public-category-list">{((selectedPeriod.categories as Array<Record<string, unknown>> | undefined) ?? []).map((category, index) => { const value = Number(category.final ?? 0); const max = Math.max(1, Number(selectedPeriod.scoringMode === "direct_points" ? category.maximum ?? category.weight : selectedPeriod.maxScore ?? 1)); return <article key={String(category.id)} style={{ "--delay": `${index * 70}ms` } as React.CSSProperties}><span>{String(category.code)}</span><div><strong>{String(category.name)}</strong><div><i style={{ width: `${Math.min(100, value / max * 100)}%` }} /></div><small>{selectedPeriod.scoringMode === "direct_points" ? "Maksimum" : "Bobot"} {Number(category.weight ?? 0)}{selectedPeriod.scoringMode === "direct_points" ? " poin" : "%"}</small></div><b>{value.toFixed(2).replace(".", ",")}</b></article>; })}</div>
     </div>}
   </section>;
 }
@@ -2646,6 +2648,14 @@ function ModulePage({
                   />
                 </label>
                 <label>
+                  Cara menghitung nilai
+                  <select value={form.scoringMode ?? 'weighted_average'} onChange={(event) => setForm({ ...form, scoringMode: event.target.value })}>
+                    <option value="weighted_average">Rata-rata berbobot</option>
+                    <option value="direct_points">Poin langsung · jumlah nilai indikator</option>
+                  </select>
+                  <small className="field-help">Pilih sebelum membuat instrumen. Mode poin memakai nilai maksimal masing-masing indikator tanpa mengalikan bobot lagi.</small>
+                </label>
+                <label>
                   Nama periode
                   <input
                     required
@@ -3344,7 +3354,7 @@ const AssessmentWorkspace = forwardRef<
     await load(nextPeriodId);
   };
   const saveScore = async () => {
-    const maxScore = Number(data.selectedPeriod?.maxScore ?? 5);
+    const maxScore = Number(selectedIndicator?.maxValue ?? data.selectedPeriod?.maxScore ?? 5);
     if (
       !selectedIndicator ||
       value === "" ||
@@ -3355,7 +3365,7 @@ const AssessmentWorkspace = forwardRef<
       return null;
     }
     if (value > maxScore) {
-      flash(`Nilai tidak boleh melebihi nilai maksimal periode (${maxScore})`);
+      flash(`Nilai tidak boleh melebihi nilai maksimal indikator (${maxScore})`);
       return null;
     }
     setSaving(true);
@@ -3420,6 +3430,8 @@ const AssessmentWorkspace = forwardRef<
     selectedStatus !== "locked" &&
     String(data.selectedPeriod?.status) !== "finalized";
   const periodMaxScore = Number(data.selectedPeriod?.maxScore ?? 5);
+  const directPoints = data.selectedPeriod?.scoringMode === 'direct_points';
+  const indicatorMaxScore = Number(selectedIndicator?.maxValue ?? periodMaxScore);
   const isAdmin = data.user?.role === "admin";
   const rejectingIndicator = rejectingId
     ? data.indicators.find(
@@ -3427,6 +3439,7 @@ const AssessmentWorkspace = forwardRef<
       )
     : undefined;
   const weightedFinalScore = (() => {
+    if (directPoints) return data.subcategories.reduce((sum, subcategory) => sum + Number(subcategory.score ?? 0), 0);
     const entered = data.subcategories.filter((subcategory) => {
       const raw = finalValues[String(subcategory.id)];
       return raw !== "" && Number.isFinite(Number(raw));
@@ -3690,8 +3703,8 @@ const AssessmentWorkspace = forwardRef<
                 </i>
                 <footer>
                   {Number(subcategory.completed ?? 0)} dari{" "}
-                  {Number(subcategory.indicatorCount ?? 0)} dinilai · Bobot{" "}
-                  {Number(subcategory.weight ?? 0)}% ·{" "}
+                  {Number(subcategory.indicatorCount ?? 0)} dinilai · {directPoints ? "Maksimum" : "Bobot"}{" "}
+                  {Number(subcategory.weight ?? 0)}{directPoints ? " poin" : "%"} ·{" "}
                   {Number(subcategory.evidenceCount ?? 0)} indikator memiliki
                   bukti
                 </footer>
@@ -3842,7 +3855,7 @@ const AssessmentWorkspace = forwardRef<
                   <input
                     type="number"
                     min="0"
-                    max={periodMaxScore}
+                    max={indicatorMaxScore}
                     step="0.01"
                     disabled={!canEdit}
                     value={value}
@@ -3851,14 +3864,14 @@ const AssessmentWorkspace = forwardRef<
                         event.target.value === ""
                           ? ""
                           : Math.min(
-                              periodMaxScore,
+                              indicatorMaxScore,
                               Math.max(0, Number(event.target.value)),
                             ),
                       )
                     }
-                    placeholder={`Masukkan nilai, maksimal ${periodMaxScore}`}
+                    placeholder={`Masukkan nilai, maksimal ${indicatorMaxScore}`}
                   />
-                  <small>Nilai maksimal periode: {periodMaxScore}</small>
+                  <small>Nilai maksimal indikator: {indicatorMaxScore}{directPoints ? " poin" : ""}</small>
                 </label>
                 <div className="target-display">
                   <span>Target Subkategori</span>
@@ -4102,8 +4115,7 @@ const AssessmentWorkspace = forwardRef<
               </strong>
               <small>
                 {String(data.selectedPeriod?.typeCode ?? "Penilaian")} · Tahun{" "}
-                {String(data.selectedPeriod?.year ?? "-")} · nilai subkategori
-                dihitung dalam kategori, kemudian dikalikan bobot kategori utama
+                {String(data.selectedPeriod?.year ?? "-")} · {directPoints ? "Poin indikator dijumlahkan tanpa dikalikan bobot lagi" : "Nilai subkategori dihitung dalam kategori, kemudian dikalikan bobot kategori utama"}
               </small>
             </section>
             <p className="finalize-warning">
@@ -4118,19 +4130,17 @@ const AssessmentWorkspace = forwardRef<
                     {String(subcategory.code)} · {String(subcategory.name)}
                   </strong>
                   <small>
-                    Kategori utama: {String(subcategory.categoryName)} · Bobot{" "}
-                    {Number(subcategory.categoryWeight ?? 0)}% &nbsp;|&nbsp;
-                    Bobot subkategori dalam kategori:{" "}
-                    {Number(subcategory.weight ?? 0)}%
+                    Kategori utama: {String(subcategory.categoryName)} · {directPoints ? `Maksimum subkategori ${Number(subcategory.maxValue ?? 0)} poin. Nilai final berasal dari indikator yang diterima, dirata-rata antarunit bila ada beberapa unit.` : `Bobot kategori ${Number(subcategory.categoryWeight ?? 0)}%; Bobot subkategori dalam kategori: ${Number(subcategory.weight ?? 0)}%`}
                   </small>
                 </span>
                 <input
                   type="number"
                   min="0"
-                  max={periodMaxScore}
+                  max={directPoints ? Number(subcategory.maxValue ?? 0) : periodMaxScore}
+                  readOnly={directPoints}
                   step="0.01"
                   required
-                  value={finalValues[String(subcategory.id)] ?? ""}
+                  value={directPoints ? Number(subcategory.score ?? 0) : finalValues[String(subcategory.id)] ?? ""}
                   onChange={(event) =>
                     setFinalValues({
                       ...finalValues,
@@ -4260,6 +4270,7 @@ const StructureManager = forwardRef<
             name: String(item[`${prefix}Name`] ?? ""),
             description: String(item.indicatorDescription ?? ""),
             weight: String(item[`${prefix}Weight`] ?? "0"),
+            maxValue: String(item.indicatorMaxValue ?? ""),
             target:
               resource === "subcategory"
                 ? String(item.subcategoryTarget ?? "4")
@@ -4464,7 +4475,7 @@ const StructureManager = forwardRef<
                 <div>
                   <strong>{String(category.categoryName)}</strong>
                   <small>
-                    Bobot {Number(category.categoryWeight ?? 0)}% ·{" "}
+                    {selectedPeriod?.scoringMode === "direct_points" ? "Maksimum" : "Bobot"} {Number(category.categoryWeight ?? 0)}{selectedPeriod?.scoringMode === "direct_points" ? " poin" : "%"} ·{" "}
                     {subs.length} subkategori
                   </small>
                 </div>
@@ -4511,7 +4522,7 @@ const StructureManager = forwardRef<
                         <div>
                           <strong>{String(subcategory.subcategoryName)}</strong>
                           <small>
-                            Bobot {Number(subcategory.subcategoryWeight ?? 0)}%
+                            {selectedPeriod?.scoringMode === "direct_points" ? "Maksimum" : "Bobot"} {Number(subcategory.subcategoryWeight ?? 0)}{selectedPeriod?.scoringMode === "direct_points" ? " poin" : "%"}
                             · Target{" "}
                             {Number(
                               subcategory.subcategoryTarget ?? 0,
@@ -4559,7 +4570,7 @@ const StructureManager = forwardRef<
                               )}
                             </div>
                             <small>
-                              Bobot {Number(indicator.indicatorWeight ?? 0)}
+                              {selectedPeriod?.scoringMode === "direct_points" ? `Maksimum ${Number(indicator.indicatorMaxValue ?? 0)} poin` : `Bobot ${Number(indicator.indicatorWeight ?? 0)}`}
                             </small>
                             <div className="structure-actions">
                               <button
@@ -4628,8 +4639,9 @@ const StructureManager = forwardRef<
               />
             </label>
             <label>
-              Bobot (%)
+              {selectedPeriod?.scoringMode === "direct_points" ? "Kontribusi maksimum dihitung dari nilai maksimal indikator" : "Bobot (%)"}
               <input
+                hidden={selectedPeriod?.scoringMode === "direct_points"}
                 type="number"
                 min="0"
                 max="100"
@@ -4640,6 +4652,7 @@ const StructureManager = forwardRef<
                 }
               />
             </label>
+            {modal.resource === "indicator" && (<label>Nilai maksimal indikator<input type="number" min="0.01" step="0.01" max={Number(selectedPeriod?.maxScore ?? 5)} required={selectedPeriod?.scoringMode === "direct_points"} value={form.maxValue ?? ""} onChange={(event) => setForm({ ...form, maxValue: event.target.value })} placeholder={selectedPeriod?.scoringMode === "direct_points" ? "Contoh: 6 atau 30" : "Kosongkan untuk mengikuti periode"} /><small className="field-help">Batas nilai yang dapat dimasukkan untuk indikator ini.</small></label>)}
             {modal.resource === "subcategory" && (
               <label>
                 Target Nilai

@@ -1,4 +1,6 @@
 import { env } from "../../../server/runtime";
+import { readAssessment } from "../../../server/assessment-scoring";
+import { indicatorMaximum, scoringMode, validateScore } from "../../../lib/assessment-scoring";
 import {
   ApiError,
   apiError,
@@ -51,7 +53,7 @@ export async function GET(request: Request) {
     const placeholders = allowedTypeIds.map(() => "?").join(",");
     const periods = await db
       .prepare(
-        `SELECT p.id,p.assessment_type_id AS typeId,p.instrument_version_id AS instrumentVersionId,p.year,p.name,p.max_score AS maxScore,p.status,p.due_at AS dueAt,t.code AS typeCode FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id WHERE p.assessment_type_id IN (${placeholders}) ORDER BY p.year DESC,t.code`,
+        `SELECT p.id,p.assessment_type_id AS typeId,p.instrument_version_id AS instrumentVersionId,p.year,p.name,p.max_score AS maxScore,p.scoring_mode AS scoringMode,p.status,p.due_at AS dueAt,t.code AS typeCode FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id WHERE p.assessment_type_id IN (${placeholders}) ORDER BY p.year DESC,t.code`,
       )
       .bind(...allowedTypeIds)
       .all();
@@ -93,13 +95,19 @@ export async function GET(request: Request) {
       )
       .bind(selected.id, unit.id, selected.instrumentVersionId)
       .all();
+    const summary = await readAssessment(String(selected.id), user.role === 'admin' && selected.scoringMode === 'direct_points' ? null : unit.id);
+    const indicatorRows = indicatorResult.results.map(row => ({ ...row, maxValue: summary.rows.find(item => item.indicatorId === row.id)?.maxValue ?? null }));
+    const subcategoryRows = subcategoryResult.results.map(row => {
+      const totals = summary.subcategories.find(item => item.id === row.id);
+      return { ...row, ...(selected.scoringMode === 'direct_points' ? { score: totals?.internal ?? 0, finalValue: totals?.final ?? null } : {}), maxValue: totals?.maximum ?? selected.maxScore };
+    });
     return Response.json(
       {
         types: typeResult.results,
         periods: periods.results,
         selectedPeriod: selected,
-        subcategories: subcategoryResult.results,
-        indicators: indicatorResult.results,
+        subcategories: subcategoryRows,
+        indicators: indicatorRows,
         user: { role: user.role },
       },
       { headers: { "Cache-Control": "private, no-store" } },
@@ -122,18 +130,21 @@ export async function POST(request: Request) {
     const periodId = String(body.periodId ?? "");
     const indicatorId = String(body.indicatorId ?? "");
     const value = Number(body.value);
+    if (body.value == null || String(body.value).trim() === '') throw new ApiError(400, 'Nilai wajib diisi');
     if (!periodId || !indicatorId || !Number.isFinite(value) || value < 0)
       throw new ApiError(400, "Nilai harus berupa angka nol atau lebih");
     const db = (env as unknown as WorkspaceEnv).DB;
     const relation = await db
       .prepare(
-        `SELECT p.assessment_type_id AS typeId,p.status AS periodStatus,p.max_score AS maxScore,COALESCE(sc.target_value,0) AS targetValue FROM assessment_periods p JOIN categories c ON c.instrument_version_id=p.instrument_version_id JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id WHERE p.id=? AND i.id=? LIMIT 1`,
+        `SELECT p.assessment_type_id AS typeId,p.status AS periodStatus,p.max_score AS maxScore,p.scoring_mode AS scoringMode,i.max_value AS indicatorMax,COALESCE(sc.target_value,0) AS targetValue FROM assessment_periods p JOIN categories c ON c.instrument_version_id=p.instrument_version_id JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id WHERE p.id=? AND i.id=? LIMIT 1`,
       )
       .bind(periodId, indicatorId)
       .first<{
         typeId: string;
         periodStatus: string;
         maxScore: number;
+        scoringMode: string;
+        indicatorMax: number | null;
         targetValue: number;
       }>();
     if (!relation)
@@ -141,11 +152,8 @@ export async function POST(request: Request) {
         404,
         "Indikator tidak termasuk dalam periode tersebut",
       );
-    if (value > relation.maxScore)
-      throw new ApiError(
-        400,
-        `Nilai tidak boleh melebihi nilai maksimal periode (${relation.maxScore})`,
-      );
+    try { validateScore(body.value, indicatorMaximum(scoringMode(relation.scoringMode), relation.indicatorMax, relation.maxScore)); }
+    catch (error) { throw new ApiError(400, (error as Error).message); }
     await assertTypeAccess(db, user, relation.typeId);
     if (relation.periodStatus === "finalized")
       throw new ApiError(409, "Penilaian telah difinalisasi dan dikunci");
@@ -229,15 +237,22 @@ export async function PATCH(request: Request) {
     if (body.action === "finalize") {
       const periodId = String(body.periodId ?? "");
       const finalValues = body.finalValues ?? {};
-      const period = await db.prepare("SELECT id,instrument_version_id AS versionId,max_score AS maxScore,status FROM assessment_periods WHERE id=? LIMIT 1").bind(periodId).first<{ id: string; versionId: string; maxScore: number; status: string }>();
+      const period = await db.prepare("SELECT id,instrument_version_id AS versionId,max_score AS maxScore,scoring_mode AS scoringMode,status FROM assessment_periods WHERE id=? LIMIT 1").bind(periodId).first<{ id: string; versionId: string; maxScore: number; scoringMode: string; status: string }>();
       if (!period) throw new ApiError(404, "Periode penilaian tidak ditemukan");
       if (period.status === "finalized") throw new ApiError(409, "Periode sudah difinalisasi");
       const readiness = await db.prepare("SELECT COUNT(DISTINCT i.id) AS total,COUNT(DISTINCT CASE WHEN s.status='approved' AND EXISTS(SELECT 1 FROM evidence_links el WHERE el.score_id=s.id) THEN i.id END) AS approved FROM categories c JOIN subcategories sc ON sc.category_id=c.id JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=? WHERE c.instrument_version_id=?").bind(periodId, period.versionId).first<{ total: number; approved: number }>();
       if (!readiness || Number(readiness.total) === 0 || Number(readiness.approved) !== Number(readiness.total)) throw new ApiError(409, "Seluruh indikator harus memiliki bukti yang diterima admin sebelum finalisasi");
       const subcategories = await db.prepare("SELECT sc.id FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=? ORDER BY sc.sort_order").bind(period.versionId).all();
       const updates: PreparedStatement[] = [];
+      const summary = await readAssessment(periodId);
+      if (period.scoringMode === 'direct_points' && Math.abs(summary.maximum - period.maxScore) > 0.000001) throw new ApiError(409, 'Jumlah nilai maksimal indikator harus sama dengan nilai maksimal periode');
+      if (period.scoringMode === 'direct_points') {
+        const invalid = await db.prepare('SELECT COUNT(*) AS total FROM indicator_scores s JOIN indicators i ON i.id=s.indicator_id WHERE s.period_id=? AND (s.internal_value IS NULL OR s.internal_value<0 OR i.max_value IS NULL OR s.internal_value>i.max_value OR s.status<>?)').bind(periodId, 'approved').first<{total:number}>();
+        if (Number(invalid?.total ?? 0)) throw new ApiError(409, 'Seluruh nilai indikator harus valid dan diterima sebelum finalisasi');
+        updates.push(db.prepare('UPDATE indicator_scores SET assessor_value=internal_value WHERE period_id=?').bind(periodId));
+      }
       for (const row of subcategories.results) {
-        const value = Number(finalValues[String(row.id)]);
+        const value = period.scoringMode === 'direct_points' ? Number(summary.subcategories.find(item => item.id === row.id)?.internal ?? 0) : Number(finalValues[String(row.id)]);
         if (!Number.isFinite(value) || value < 0 || value > period.maxScore) throw new ApiError(400, `Nilai final setiap subkategori wajib diisi antara 0 dan ${period.maxScore}`);
         updates.push(db.prepare("UPDATE subcategories SET final_value=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(value, String(row.id)));
       }
