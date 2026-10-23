@@ -4,6 +4,8 @@ export type ScoreRow = {
   categoryWeight?: number | null; subcategoryWeight?: number | null;
   maxValue?: number | null; internalValue?: number | null; assessorValue?: number | null;
   finalValue?: number | null; targetValue?: number | null;
+  status?: string | null; evidenceCount?: number; verifiedValue?: number | null;
+  accepted?: boolean; rejected?: boolean;
 };
 export function scoringMode(value: unknown): ScoringMode {
   if (value === undefined || value === null || value === 'weighted_average') return 'weighted_average';
@@ -38,25 +40,27 @@ export function aggregateAssessment(rows: ScoreRow[], mode: ScoringMode, periodM
     const first = children[0];
     const indicators = [...new Set(children.map(row => row.indicatorId).filter(Boolean))].map(indicatorId => {
       const units = children.filter(row => row.indicatorId === indicatorId);
-      return { internal: average(units.map(row => row.internalValue)), final: average(units.map(row => row.assessorValue)), maximum: indicatorMaximum(mode, units[0].maxValue, periodMaximum) };
+      const accepted = (row: ScoreRow) => finite(row.internalValue) && (row.accepted ?? (['approved','locked'].includes(row.status ?? '') && Number(row.evidenceCount ?? 0) > 0));
+      return { internal: average(units.map(row => row.internalValue)), final: average(units.map(row => row.assessorValue)), verified: average(units.map(row => row.verifiedValue !== undefined ? row.verifiedValue : accepted(row) ? row.internalValue : finite(row.internalValue) ? 0 : null)), accepted: units.length > 0 && units.every(accepted), rejected: units.some(row => row.rejected ?? row.status === 'rejected'), maximum: indicatorMaximum(mode, units[0].maxValue, periodMaximum) };
     });
     const maximum = mode === 'direct_points' ? sum(indicators.map(row => row.maximum)) : periodMaximum;
     const internal = mode === 'direct_points' ? sum(indicators.map(row => row.internal)) : average(indicators.map(row => row.internal));
+    const verified = mode === 'direct_points' ? sum(indicators.map(row => row.verified)) : average(indicators.map(row => row.verified));
     // Direct mode always uses indicator finals; legacy mode retains the assessor's subcategory value.
     const final = mode === 'direct_points'
       ? (indicators.some(row => row.final != null) ? sum(indicators.map(row => row.final)) : null)
       : first.finalValue == null ? average(indicators.map(row => row.final)) : Number(first.finalValue);
-    return { id, categoryId: first.categoryId, weight: Number(first.subcategoryWeight ?? 0), categoryWeight: Number(first.categoryWeight ?? 0), maximum, internal, final, target: first.targetValue == null ? null : Number(first.targetValue), total: indicators.length, completed: indicators.filter(row => row.internal != null).length };
+    return { id, categoryId: first.categoryId, weight: Number(first.subcategoryWeight ?? 0), categoryWeight: Number(first.categoryWeight ?? 0), maximum, internal, verified, accepted: indicators.filter(row => row.accepted).length, rejected: indicators.filter(row => row.rejected).length, final, target: first.targetValue == null ? null : Number(first.targetValue), total: indicators.length, completed: indicators.filter(row => row.internal != null).length };
   });
   const categories = [...new Set(rows.map(row => row.categoryId))].map(id => {
     const children = subcategories.filter(row => row.categoryId === id);
-    const combine = (key: 'internal' | 'final' | 'target') => mode === 'direct_points'
+    const combine = (key: 'internal' | 'verified' | 'final' | 'target') => mode === 'direct_points'
       ? (key === 'final' && !children.some(row => row.final != null) ? null : sum(children.map(row => row[key])))
       : weighted(children.map(row => ({value:row[key], weight:row.weight})));
-    return { id, weight: children[0].categoryWeight, maximum: mode === 'direct_points' ? sum(children.map(row => row.maximum)) : periodMaximum, internal: combine('internal'), final: combine('final'), target: combine('target'), total: sum(children.map(row => row.total)), completed: sum(children.map(row => row.completed)) };
+    return { id, weight: children[0].categoryWeight, maximum: mode === 'direct_points' ? sum(children.map(row => row.maximum)) : periodMaximum, internal: combine('internal'), verified: combine('verified'), accepted: sum(children.map(row => row.accepted)), rejected: sum(children.map(row => row.rejected)), final: combine('final'), target: combine('target'), total: sum(children.map(row => row.total)), completed: sum(children.map(row => row.completed)) };
   });
-  const combine = (key: 'internal' | 'final' | 'target') => mode === 'direct_points'
+  const combine = (key: 'internal' | 'verified' | 'final' | 'target') => mode === 'direct_points'
     ? (key === 'final' && !categories.some(row => row.final != null) ? null : sum(categories.map(row => row[key])))
     : weighted(categories.map(row => ({value:row[key], weight:row.weight})));
-  return { subcategories, categories, internal: combine('internal'), final: combine('final'), target: combine('target'), maximum: mode === 'direct_points' ? sum(categories.map(row => row.maximum)) : periodMaximum, total: sum(categories.map(row => row.total)), completed: sum(categories.map(row => row.completed)) };
+  return { subcategories, categories, internal: combine('internal'), verified: combine('verified'), accepted: sum(categories.map(row => row.accepted)), rejected: sum(categories.map(row => row.rejected)), final: combine('final'), target: combine('target'), maximum: mode === 'direct_points' ? sum(categories.map(row => row.maximum)) : periodMaximum, total: sum(categories.map(row => row.total)), completed: sum(categories.map(row => row.completed)) };
 }

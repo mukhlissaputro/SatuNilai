@@ -32,16 +32,18 @@ export async function GET(request: Request) {
     if (summary.period.scoringMode === 'direct_points') {
       for (const row of categoryResult.results) {
         const total = summary.categories.find(item => item.id === row.id);
-        row.score = total?.internal ?? 0;
+        row.internalScore = total?.internal ?? 0;
+        row.score = total?.verified ?? 0;
+        row.completed = total?.accepted ?? 0;
         row.maximum = total?.maximum ?? 0;
       }
-      if (metrics) { metrics.currentValue = summary.internal ?? 0; metrics.targetValue = summary.target ?? 0; }
+      if (metrics) { metrics.internalValue = summary.internal ?? 0; metrics.currentValue = summary.verified ?? 0; metrics.acceptedIndicators = summary.accepted; metrics.rejectedIndicators = summary.rejected; metrics.targetValue = summary.target ?? 0; }
     }
     const pastPeriods = await binding.prepare('SELECT id,year,scoring_mode AS mode FROM assessment_periods WHERE assessment_type_id=? AND year<=?').bind(period.typeId, period.year).all();
     for (const past of pastPeriods.results.filter(item => item.mode === 'direct_points')) {
       const totals = await readAssessment(String(past.id), user.role === 'staff' ? user.unitId : null);
       const point = history.results.find(item => Number(item.year) === Number(past.year));
-      if (point) point.value = totals.internal ?? 0;
+      if (point) point.value = totals.verified ?? 0;
     }
     return Response.json({ types: typeRows.results, periods: periodRows.results, period, categories: categoryResult.results, indicators: [], metrics, history: history.results }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiError(error); }

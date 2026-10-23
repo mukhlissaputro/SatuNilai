@@ -1383,7 +1383,7 @@ function DashboardWorkspace({
   );
   const metrics = data.metrics ?? {};
   const total = Number(metrics.totalIndicators ?? 0);
-  const assessed = Number(metrics.assessedIndicators ?? 0);
+  const assessed = Number(data.period?.scoringMode === 'direct_points' ? metrics.acceptedIndicators ?? 0 : metrics.assessedIndicators ?? 0);
   const withEvidence = Number(metrics.indicatorsWithEvidence ?? 0);
   const target = Number(metrics.targetValue ?? 0);
   const maxScore = Number(data.period?.maxScore ?? 5);
@@ -1465,7 +1465,7 @@ function DashboardWorkspace({
         </label>
         {data.period && (
           <div className="final-score">
-            <span>Nilai {String(data.period.assessmentCode)}</span>
+            <span>Nilai {data.period.scoringMode === 'direct_points' ? 'terverifikasi ' : ''}{String(data.period.assessmentCode)}</span>
             <strong>{finalScore.toFixed(2).replace(".", ",")}</strong>
             <b className="badge green">{String(data.period.status)}</b>
           </div>
@@ -1534,21 +1534,21 @@ function DashboardWorkspace({
             <article>
               <span className="metric-icon green">✓</span>
               <div>
-                <small>SUDAH DINILAI</small>
+                <small>{data.period?.scoringMode === 'direct_points' ? 'INDIKATOR DITERIMA' : 'SUDAH DINILAI'}</small>
                 <strong>
                   {assessed} <i>/ {total}</i>
                 </strong>
                 <p>
                   <b>{total ? Math.round((assessed / total) * 100) : 0}%</b>{" "}
-                  telah dinilai
+                  {data.period?.scoringMode === 'direct_points' ? 'telah diterima' : 'telah dinilai'}
                 </p>
               </div>
             </article>
             <article>
               <span className="metric-icon amber">◷</span>
               <div>
-                <small>PERLU DILENGKAPI</small>
-                <strong>{Math.max(0, total - withEvidence)}</strong>
+                <small>{data.period?.scoringMode === 'direct_points' ? 'BELUM DITERIMA' : 'PERLU DILENGKAPI'}</small>
+                <strong>{Math.max(0, total - (data.period?.scoringMode === 'direct_points' ? assessed : withEvidence))}</strong>
                 <p>
                   <b>{withEvidence} indikator</b> memiliki bukti
                 </p>
@@ -1584,7 +1584,7 @@ function DashboardWorkspace({
               <div className="weight-header">
                 <span>Kategori & progres</span>
                 <span>{data.period?.scoringMode === 'direct_points' ? 'Maksimum' : 'Bobot'}</span>
-                <span>Nilai</span>
+                <span>{data.period?.scoringMode === 'direct_points' ? 'Terverifikasi' : 'Nilai'}</span>
                 <span>Bukti</span>
               </div>
               {data.categories.map((category, index) => {
@@ -1619,7 +1619,7 @@ function DashboardWorkspace({
                           .replace(".", ",")}
                       </strong>
                       <small>
-                        {completed}/{categoryTotal} dinilai
+                        {completed}/{categoryTotal} {data.period?.scoringMode === 'direct_points' ? 'diterima' : 'dinilai'}
                       </small>
                     </div>
                     <div className="contribution">
@@ -3439,7 +3439,7 @@ const AssessmentWorkspace = forwardRef<
       )
     : undefined;
   const weightedFinalScore = (() => {
-    if (directPoints) return data.subcategories.reduce((sum, subcategory) => sum + Number(subcategory.score ?? 0), 0);
+    if (directPoints) return data.subcategories.reduce((sum, subcategory) => sum + Number(subcategory.verifiedScore ?? 0), 0);
     const entered = data.subcategories.filter((subcategory) => {
       const raw = finalValues[String(subcategory.id)];
       return raw !== "" && Number.isFinite(Number(raw));
@@ -3662,10 +3662,10 @@ const AssessmentWorkspace = forwardRef<
             </div>
           )}
           {data.subcategories.map((subcategory) => {
-            const score = Number(subcategory.score ?? 0);
+            const score = Number(directPoints ? subcategory.verifiedScore ?? 0 : subcategory.score ?? 0);
             const targetValue = Number(subcategory.target ?? 0);
             const active = String(subcategory.id) === subcategoryId;
-            const hasEvidence = Number(subcategory.evidenceCount ?? 0) > 0;
+            const hasEvidence = Number(directPoints ? subcategory.accepted ?? 0 : subcategory.evidenceCount ?? 0) > 0;
             return (
               <button
                 key={String(subcategory.id)}
@@ -3683,9 +3683,10 @@ const AssessmentWorkspace = forwardRef<
                 <div>
                   <em>{score.toFixed(2).replace(".", ",")}</em>
                   <small>
-                    Mandiri · Target {targetValue.toLocaleString("id-ID")}
+                    {directPoints ? 'Terverifikasi' : 'Mandiri'} · Target {targetValue.toLocaleString("id-ID")}
                   </small>
                 </div>
+                {directPoints && <small>Nilai mandiri: {Number(subcategory.score ?? 0).toLocaleString('id-ID')}</small>}
                 <div className="subcategory-final">
                   <span>Nilai final asesor</span>
                   <strong>
@@ -3702,11 +3703,11 @@ const AssessmentWorkspace = forwardRef<
                   />
                 </i>
                 <footer>
-                  {Number(subcategory.completed ?? 0)} dari{" "}
-                  {Number(subcategory.indicatorCount ?? 0)} dinilai · {directPoints ? "Maksimum" : "Bobot"}{" "}
+                  {Number(directPoints ? subcategory.accepted ?? 0 : subcategory.completed ?? 0)} dari{" "}
+                  {Number(subcategory.indicatorCount ?? 0)} {directPoints ? 'indikator diterima' : 'dinilai'}
+                  {directPoints && Number(subcategory.rejected ?? 0) > 0 ? ` · ${Number(subcategory.rejected)} ditolak` : ''} · {directPoints ? "Maksimum" : "Bobot"}{" "}
                   {Number(subcategory.weight ?? 0)}{directPoints ? " poin" : "%"} ·{" "}
-                  {Number(subcategory.evidenceCount ?? 0)} indikator memiliki
-                  bukti
+                  {Number(subcategory.evidenceCount ?? 0)} {directPoints ? 'indikator dengan unggahan bukti' : 'indikator memiliki bukti'}
                 </footer>
               </button>
             );
@@ -4140,7 +4141,7 @@ const AssessmentWorkspace = forwardRef<
                   readOnly={directPoints}
                   step="0.01"
                   required
-                  value={directPoints ? Number(subcategory.score ?? 0) : finalValues[String(subcategory.id)] ?? ""}
+                  value={directPoints ? Number(subcategory.verifiedScore ?? 0) : finalValues[String(subcategory.id)] ?? ""}
                   onChange={(event) =>
                     setFinalValues({
                       ...finalValues,

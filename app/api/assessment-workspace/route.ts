@@ -99,7 +99,7 @@ export async function GET(request: Request) {
     const indicatorRows = indicatorResult.results.map(row => ({ ...row, maxValue: summary.rows.find(item => item.indicatorId === row.id)?.maxValue ?? null }));
     const subcategoryRows = subcategoryResult.results.map(row => {
       const totals = summary.subcategories.find(item => item.id === row.id);
-      return { ...row, ...(selected.scoringMode === 'direct_points' ? { score: totals?.internal ?? 0, finalValue: totals?.final ?? null } : {}), maxValue: totals?.maximum ?? selected.maxScore };
+      return { ...row, ...(selected.scoringMode === 'direct_points' ? { score: totals?.internal ?? 0, verifiedScore: totals?.verified ?? 0, accepted: totals?.accepted ?? 0, rejected: totals?.rejected ?? 0, completed: totals?.completed ?? 0, indicatorCount: totals?.total ?? 0, finalValue: totals?.final ?? null } : {}), maxValue: totals?.maximum ?? selected.maxScore };
     });
     return Response.json(
       {

@@ -41,3 +41,23 @@ test('multiple units are averaged per indicator and repeated evidence rows canno
   const repeated = aggregateAssessment([row, row, row], 'direct_points', 100);
   assert.equal(repeated.internal, 6); assert.equal(repeated.maximum, 6);
 });
+
+test('rejected RUP evidence contributes zero verified points without erasing the staff value', () => {
+  const rows = [5,2.5,2.5].map((maximum,index) => ({indicatorId:`i${index}`,subcategoryId:'plan',categoryId:'system',categoryWeight:30,subcategoryWeight:10,maxValue:maximum,internalValue:maximum,status:index===1?'rejected':'approved',evidenceCount:1}));
+  const summary=aggregateAssessment(rows,'direct_points',100);
+  assert.equal(summary.internal,10); assert.equal(summary.verified,7.5);
+  assert.equal(summary.subcategories[0].accepted,2); assert.equal(summary.subcategories[0].rejected,1);
+  assert.equal(summary.accepted,2);assert.equal(summary.total,3);
+});
+
+test('pending evidence, rejected evidence and approved values without evidence never count as accepted', () => {
+  const rows=['draft','submitted','rejected','approved','locked'].map((status,index)=>({indicatorId:`i${index}`,subcategoryId:'s',categoryId:'c',maxValue:5,internalValue:5,status,evidenceCount:index===3?0:1}));
+  const summary=aggregateAssessment(rows,'direct_points',100);
+  assert.equal(summary.verified,5); assert.equal(summary.accepted,1);assert.equal(summary.completed,5);
+});
+
+test('verification across units does not remove rejected units from the denominator', () => {
+  const base={indicatorId:'i',subcategoryId:'s',categoryId:'c',maxValue:5,internalValue:5,evidenceCount:1};
+  const summary=aggregateAssessment([{...base,status:'approved'},{...base,status:'rejected'}],'direct_points',100);
+  assert.equal(summary.internal,5);assert.equal(summary.verified,2.5);assert.equal(summary.accepted,0);
+});
