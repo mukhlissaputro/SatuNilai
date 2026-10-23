@@ -1,4 +1,5 @@
 import { env } from "../../../server/runtime";
+import { indicatorMaximum, scoringMode } from "../../../lib/assessment-scoring";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { assessmentPeriods, assessmentTypes, categories, indicators, instrumentVersions, subcategories, units, users } from "../../../db/schema";
@@ -8,6 +9,51 @@ type AdminEnv = { DB: LocalDatabase };
 const allowedRoles = new Set(["admin", "staff", "head"]);
 const allowedStatuses = new Set(["draft", "open", "review", "finalized"]);
 
+async function assertMutableStructure(resource: string, body: Record<string, unknown>, id?: string) {
+  if (!['category','subcategory','indicator'].includes(resource)) return;
+  const binding = (env as unknown as AdminEnv).DB;
+  const sql = id
+    ? resource === 'category' ? 'SELECT instrument_version_id AS versionId FROM categories WHERE id=?'
+      : resource === 'subcategory' ? 'SELECT c.instrument_version_id AS versionId FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE sc.id=?'
+      : 'SELECT c.instrument_version_id AS versionId FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE i.id=?'
+    : resource === 'category' ? 'SELECT id AS versionId FROM instrument_versions WHERE id=?'
+      : resource === 'subcategory' ? 'SELECT instrument_version_id AS versionId FROM categories WHERE id=?'
+      : 'SELECT c.instrument_version_id AS versionId FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE sc.id=?';
+  const record = await binding.prepare(sql).bind(id ?? String(resource === 'category' ? body.versionId : body.parentId)).first<{versionId:string}>();
+  if (!record) throw new ApiError(404, 'Struktur instrumen tidak ditemukan');
+  const locked = await binding.prepare("SELECT id FROM assessment_periods WHERE instrument_version_id=? AND status='finalized' LIMIT 1").bind(record.versionId).first();
+  if (locked) throw new ApiError(409, 'Instrumen periode final tidak dapat diubah');
+  return record.versionId;
+}
+
+async function refreshPointContributions(versionId?: string) {
+  if (!versionId) return;
+  const db = (env as unknown as AdminEnv).DB;
+  const period = await db.prepare('SELECT scoring_mode AS mode FROM assessment_periods WHERE instrument_version_id=? LIMIT 1').bind(versionId).first<{mode:string}>();
+  if (period?.mode !== 'direct_points') return;
+  await db.batch([
+    db.prepare('UPDATE indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id SET i.weight_percent=i.max_value WHERE c.instrument_version_id=?').bind(versionId),
+    db.prepare('UPDATE subcategories sc JOIN categories c ON c.id=sc.category_id SET sc.weight_percent=(SELECT COALESCE(SUM(i.max_value),0) FROM indicators i WHERE i.subcategory_id=sc.id) WHERE c.instrument_version_id=?').bind(versionId),
+    db.prepare('UPDATE categories c SET c.weight_percent=(SELECT COALESCE(SUM(sc.weight_percent),0) FROM subcategories sc WHERE sc.category_id=c.id) WHERE c.instrument_version_id=?').bind(versionId),
+  ]);
+}
+
+async function indicatorConfig(body: Record<string, unknown>, id?: string) {
+  const db = (env as unknown as AdminEnv).DB;
+  const period = await db.prepare(`SELECT p.max_score AS maxScore,p.scoring_mode AS scoringMode,p.status FROM subcategories sc JOIN categories c ON c.id=sc.category_id JOIN assessment_periods p ON p.instrument_version_id=c.instrument_version_id ${id ? 'JOIN indicators i ON i.subcategory_id=sc.id WHERE i.id=?' : 'WHERE sc.id=?'} LIMIT 1`).bind(id ?? String(body.parentId ?? '')).first<{maxScore:number;scoringMode:string;status:string}>();
+  if (!period) throw new ApiError(404, 'Periode indikator tidak ditemukan');
+  if (period.status === 'finalized') throw new ApiError(409, 'Instrumen periode final tidak dapat diubah');
+  let maxValue: number | null = null;
+  try { maxValue = body.maxValue == null || body.maxValue === '' ? null : indicatorMaximum(scoringMode(period.scoringMode), body.maxValue, period.maxScore); if (period.scoringMode === 'direct_points') indicatorMaximum('direct_points', maxValue, period.maxScore); }
+  catch (error) { throw new ApiError(400, (error as Error).message); }
+  if (maxValue != null && maxValue > period.maxScore) throw new ApiError(400, 'Maksimum indikator tidak boleh melebihi maksimum periode');
+  if (id) {
+    const existing = await db.prepare('SELECT MAX(GREATEST(COALESCE(internal_value,0),COALESCE(assessor_value,0))) AS maximum FROM indicator_scores WHERE indicator_id=?').bind(id).first<{maximum:number}>();
+    if (Number(existing?.maximum ?? 0) > (maxValue ?? period.maxScore)) throw new ApiError(409, 'Maksimum baru lebih kecil dari nilai yang sudah tersimpan');
+  }
+  return { maxValue };
+}
+
 export async function GET(request: Request) {
   try {
     await requireUser(request, ["admin"]);
@@ -16,8 +62,8 @@ export async function GET(request: Request) {
       db.prepare("SELECT id, code, name, active FROM units ORDER BY name").all(),
       db.prepare("SELECT u.id, u.email, u.display_name AS displayName, u.role, u.active, GROUP_CONCAT(uat.assessment_type_id) AS assessmentTypeIds FROM users u LEFT JOIN user_assessment_types uat ON uat.user_id=u.id GROUP BY u.id ORDER BY u.display_name").all(),
       db.prepare("SELECT t.id, t.code, t.name, t.description, t.is_public AS isPublic, t.active, COUNT(v.id) AS versions FROM assessment_types t LEFT JOIN instrument_versions v ON v.assessment_type_id = t.id GROUP BY t.id ORDER BY t.code").all(),
-      db.prepare("SELECT p.id, p.assessment_type_id AS typeId, p.instrument_version_id AS instrumentVersionId, p.name, p.year, p.max_score AS maxScore, p.starts_at AS startsAt, p.due_at AS dueAt, p.status, t.code AS typeCode, t.name AS typeName, v.version AS versionNumber, v.name AS versionName, v.status AS versionStatus FROM assessment_periods p JOIN assessment_types t ON t.id = p.assessment_type_id JOIN instrument_versions v ON v.id = p.instrument_version_id ORDER BY t.code, p.year DESC").all(),
-      db.prepare("SELECT c.id AS categoryId, c.instrument_version_id AS instrumentVersionId, c.code AS categoryCode, c.name AS categoryName, c.weight_percent AS categoryWeight, c.target_value AS categoryTarget, c.sort_order AS categorySortOrder, sc.id AS subcategoryId, sc.code AS subcategoryCode, sc.name AS subcategoryName, sc.weight_percent AS subcategoryWeight, sc.target_value AS subcategoryTarget, sc.sort_order AS subcategorySortOrder, i.id AS indicatorId, i.code AS indicatorCode, i.name AS indicatorName, i.description AS indicatorDescription, i.weight_percent AS indicatorWeight, i.target_value AS indicatorTarget, i.sort_order AS indicatorSortOrder FROM categories c LEFT JOIN subcategories sc ON sc.category_id = c.id LEFT JOIN indicators i ON i.subcategory_id = sc.id ORDER BY c.sort_order, sc.sort_order, i.sort_order").all(),
+      db.prepare("SELECT p.id, p.assessment_type_id AS typeId, p.instrument_version_id AS instrumentVersionId, p.name, p.year, p.max_score AS maxScore, p.scoring_mode AS scoringMode, p.starts_at AS startsAt, p.due_at AS dueAt, p.status, t.code AS typeCode, t.name AS typeName, v.version AS versionNumber, v.name AS versionName, v.status AS versionStatus FROM assessment_periods p JOIN assessment_types t ON t.id = p.assessment_type_id JOIN instrument_versions v ON v.id = p.instrument_version_id ORDER BY t.code, p.year DESC").all(),
+      db.prepare("SELECT c.id AS categoryId, c.instrument_version_id AS instrumentVersionId, c.code AS categoryCode, c.name AS categoryName, c.weight_percent AS categoryWeight, c.target_value AS categoryTarget, c.sort_order AS categorySortOrder, sc.id AS subcategoryId, sc.code AS subcategoryCode, sc.name AS subcategoryName, sc.weight_percent AS subcategoryWeight, sc.target_value AS subcategoryTarget, sc.sort_order AS subcategorySortOrder, i.id AS indicatorId, i.code AS indicatorCode, i.name AS indicatorName, i.description AS indicatorDescription, i.weight_percent AS indicatorWeight, i.max_value AS indicatorMaxValue, i.target_value AS indicatorTarget, i.sort_order AS indicatorSortOrder FROM categories c LEFT JOIN subcategories sc ON sc.category_id = c.id LEFT JOIN indicators i ON i.subcategory_id = sc.id ORDER BY c.sort_order, sc.sort_order, i.sort_order").all(),
     ]);
     return Response.json({ units: unitRows.results, users: userRows.results, types: typeRows.results, periods: periodRows.results, structure: structureRows.results }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiError(error); }
@@ -29,6 +75,7 @@ export async function POST(request: Request) {
     const user = await requireUser(request, ["admin"]);
     const body = await request.json() as Record<string, unknown>;
     const resource = String(body.resource ?? "");
+    const structureVersion = await assertMutableStructure(resource, body);
     const db = getDb();
     const id = crypto.randomUUID();
     if (resource === "unit") {
@@ -60,6 +107,7 @@ export async function POST(request: Request) {
       const typeId = String(body.typeId ?? "");
       const year = Number(body.year);
       const maxScore = Number(body.maxScore);
+      let mode; try { mode = scoringMode(body.scoringMode); } catch { throw new ApiError(400, "Mode penilaian tidak valid"); }
       const name = String(body.name ?? "").trim().slice(0, 180);
       const startsAt = String(body.startsAt ?? "");
       const dueAt = String(body.dueAt ?? "");
@@ -75,17 +123,20 @@ export async function POST(request: Request) {
       const versionId = crypto.randomUUID();
       await db.batch([
         db.insert(instrumentVersions).values({ id: versionId, assessmentTypeId: typeId, version: Number(next?.number ?? 1), name: `Instrumen ${type.code} ${year}`, status: "draft" }),
-        db.insert(assessmentPeriods).values({ id, assessmentTypeId: typeId, instrumentVersionId: versionId, year, name, maxScore, startsAt, dueAt, status: "draft" }),
+        db.insert(assessmentPeriods).values({ id, assessmentTypeId: typeId, instrumentVersionId: versionId, year, name, maxScore, scoringMode: mode, startsAt, dueAt, status: "draft" }),
       ]);
     } else if (resource === "structureDuplicate") {
       const binding = (env as unknown as AdminEnv).DB;
       const targetPeriodId = String(body.targetPeriodId ?? "");
       const sourcePeriodId = String(body.sourcePeriodId ?? "");
       if (!targetPeriodId || !sourcePeriodId || targetPeriodId === sourcePeriodId) throw new ApiError(400, "Periode sumber dan tujuan duplikasi tidak valid");
-      const pair = await binding.prepare("SELECT target.assessment_type_id AS targetTypeId, target.instrument_version_id AS targetVersionId, target.year AS targetYear, target.max_score AS targetMaxScore, target.status AS targetStatus, source.assessment_type_id AS sourceTypeId, source.instrument_version_id AS sourceVersionId, source.year AS sourceYear FROM assessment_periods target JOIN assessment_periods source ON source.id=? WHERE target.id=? LIMIT 1").bind(sourcePeriodId, targetPeriodId).first<{ targetTypeId: string; targetVersionId: string; targetYear: number; targetMaxScore: number; targetStatus: string; sourceTypeId: string; sourceVersionId: string; sourceYear: number }>();
+      const pair = await binding.prepare("SELECT target.assessment_type_id AS targetTypeId, target.instrument_version_id AS targetVersionId, target.year AS targetYear, target.max_score AS targetMaxScore,target.scoring_mode AS targetMode,source.scoring_mode AS sourceMode, target.status AS targetStatus, source.assessment_type_id AS sourceTypeId, source.instrument_version_id AS sourceVersionId, source.year AS sourceYear FROM assessment_periods target JOIN assessment_periods source ON source.id=? WHERE target.id=? LIMIT 1").bind(sourcePeriodId, targetPeriodId).first<{ targetTypeId: string; targetVersionId: string; targetYear: number; targetMaxScore: number; targetMode: string; sourceMode: string; targetStatus: string; sourceTypeId: string; sourceVersionId: string; sourceYear: number }>();
       if (!pair) throw new ApiError(404, "Periode sumber atau tujuan tidak ditemukan");
       if (pair.targetTypeId !== pair.sourceTypeId || Number(pair.sourceYear) >= Number(pair.targetYear)) throw new ApiError(409, "Instrumen hanya dapat diduplikasi dari tahun sebelumnya pada jenis penilaian yang sama");
       if (pair.targetStatus === "finalized") throw new ApiError(409, "Kategori indikator pada periode final tidak dapat diubah");
+      if (pair.targetMode !== pair.sourceMode) throw new ApiError(409, "Mode penilaian sumber dan tujuan harus sama");
+      const cap = await binding.prepare("SELECT MAX(i.max_value) AS maximum,SUM(i.max_value) AS total,SUM(i.max_value IS NULL) AS missing FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(pair.sourceVersionId).first<{maximum:number;total:number;missing:number}>();
+      if (Number(cap?.maximum ?? 0) > pair.targetMaxScore || (pair.targetMode === "direct_points" && (Number(cap?.missing ?? 0) || Number(cap?.total ?? 0) !== pair.targetMaxScore))) throw new ApiError(409, "Maksimum indikator sumber tidak cocok dengan periode tujuan");
       const [targetCount, sourceCount, sourceTarget] = await Promise.all([
         binding.prepare("SELECT COUNT(*) AS count FROM categories WHERE instrument_version_id=?").bind(pair.targetVersionId).first<{ count: number }>(),
         binding.prepare("SELECT COUNT(*) AS count FROM categories WHERE instrument_version_id=?").bind(pair.sourceVersionId).first<{ count: number }>(),
@@ -98,7 +149,7 @@ export async function POST(request: Request) {
       await binding.batch([
         binding.prepare("INSERT INTO categories(id,instrument_version_id,code,name,weight_percent,target_value,sort_order) SELECT CONCAT('copy-category:', MD5(CONCAT(?, ':', c.id))), ?, c.code, c.name, c.weight_percent, NULL, c.sort_order FROM categories c WHERE c.instrument_version_id=?").bind(prefix, pair.targetVersionId, pair.sourceVersionId),
         binding.prepare("INSERT INTO subcategories(id,category_id,code,name,weight_percent,target_value,final_value,sort_order) SELECT CONCAT('copy-subcategory:', MD5(CONCAT(?, ':', sc.id))), CONCAT('copy-category:', MD5(CONCAT(?, ':', sc.category_id))), sc.code, sc.name, sc.weight_percent, sc.target_value, NULL, sc.sort_order FROM subcategories sc JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
-        binding.prepare("INSERT INTO indicators(id,subcategory_id,code,name,description,weight_percent,target_value,sort_order) SELECT CONCAT('copy-indicator:', MD5(CONCAT(?, ':', i.id))), CONCAT('copy-subcategory:', MD5(CONCAT(?, ':', i.subcategory_id))), i.code, i.name, i.description, i.weight_percent, NULL, i.sort_order FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
+        binding.prepare("INSERT INTO indicators(id,subcategory_id,code,name,description,weight_percent,max_value,target_value,sort_order) SELECT CONCAT('copy-indicator:', MD5(CONCAT(?, ':', i.id))), CONCAT('copy-subcategory:', MD5(CONCAT(?, ':', i.subcategory_id))), i.code, i.name, i.description, i.weight_percent, i.max_value, NULL, i.sort_order FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
         binding.prepare("INSERT INTO score_options(id,indicator_id,value,label,description,sort_order) SELECT CONCAT('copy-option:', MD5(CONCAT(?, ':', so.id))), CONCAT('copy-indicator:', MD5(CONCAT(?, ':', so.indicator_id))), so.value, so.label, so.description, so.sort_order FROM score_options so JOIN indicators i ON i.id=so.indicator_id JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(prefix, prefix, pair.sourceVersionId),
       ]);
       await audit(request, user, "structure.duplicated", "assessment_period", targetPeriodId, { sourcePeriodId, sourceYear: pair.sourceYear });
@@ -114,8 +165,9 @@ export async function POST(request: Request) {
       if (targetValue > period.maxScore) throw new ApiError(400, `Target tidak boleh melebihi nilai maksimal periode (${period.maxScore})`);
       await db.insert(subcategories).values({ id, categoryId: String(body.parentId ?? ""), code: String(body.code ?? "").slice(0, 30), name: String(body.name ?? "").slice(0, 180), weightPercent: Number(body.weight ?? 0), targetValue, sortOrder: Number(body.sortOrder ?? 99) });
     } else if (resource === "indicator") {
-      await db.insert(indicators).values({ id, subcategoryId: String(body.parentId ?? ""), code: String(body.code ?? "").slice(0, 30), name: String(body.name ?? "").slice(0, 240), weightPercent: Number(body.weight ?? 0), targetValue: null, sortOrder: Number(body.sortOrder ?? 99) });
+      await db.insert(indicators).values({ id, subcategoryId: String(body.parentId ?? ""), code: String(body.code ?? "").slice(0, 30), name: String(body.name ?? "").slice(0, 240), weightPercent: Number(body.weight ?? 0), targetValue: null, ...await indicatorConfig(body), sortOrder: Number(body.sortOrder ?? 99) });
     } else throw new ApiError(400, "Jenis data tidak dikenali");
+    await refreshPointContributions(structureVersion);
     await audit(request, user, `${resource}.created`, resource, id);
     return Response.json({ id, saved: true }, { status: 201 });
   } catch (error) { return apiError(error); }
@@ -129,6 +181,7 @@ export async function PATCH(request: Request) {
     if (!body.id) throw new ApiError(400, "ID wajib diisi");
     const db = getDb();
     const id = String(body.id);
+    const structureVersion = await assertMutableStructure(String(body.resource), body, id);
     const now = new Date().toISOString();
     if (body.resource === "type") {
       const code = String(body.code ?? "").trim().toUpperCase().slice(0, 30);
@@ -163,20 +216,26 @@ export async function PATCH(request: Request) {
     } else if (body.resource === "period") {
       const year = Number(body.year);
       const maxScore = Number(body.maxScore);
+      let mode; try { mode = scoringMode(body.scoringMode); } catch { throw new ApiError(400, "Mode penilaian tidak valid"); }
       const status = String(body.status ?? "draft");
       const name = String(body.name ?? "").trim().slice(0, 180);
       const startsAt = String(body.startsAt ?? "");
       const dueAt = String(body.dueAt ?? "");
       if (!Number.isInteger(year) || !Number.isFinite(maxScore) || maxScore <= 0 || !name || !allowedStatuses.has(status) || !/^\d{4}-\d{2}-\d{2}/.test(startsAt) || !/^\d{4}-\d{2}-\d{2}/.test(dueAt) || startsAt > dueAt) throw new ApiError(400, "Data periode, nilai maksimal, dan rentang tanggal tidak valid");
       const binding = (env as unknown as AdminEnv).DB;
-      const current = await binding.prepare("SELECT p.assessment_type_id AS typeId, p.instrument_version_id AS versionId, t.code FROM assessment_periods p JOIN assessment_types t ON t.id = p.assessment_type_id WHERE p.id = ? LIMIT 1").bind(id).first<{ typeId: string; versionId: string; code: string }>();
+      const current = await binding.prepare("SELECT p.assessment_type_id AS typeId, p.instrument_version_id AS versionId, p.scoring_mode AS scoringMode, p.status, t.code FROM assessment_periods p JOIN assessment_types t ON t.id = p.assessment_type_id WHERE p.id = ? LIMIT 1").bind(id).first<{ typeId: string; versionId: string; code: string; scoringMode: string; status: string }>();
       if (!current) throw new ApiError(404, "Tahun penilaian tidak ditemukan");
+      if (current.status === "finalized" || status === "finalized") throw new ApiError(409, "Gunakan alur finalisasi penilaian; periode final tidak dapat diubah");
+      const configured = await binding.prepare("SELECT COUNT(*) AS total FROM categories WHERE instrument_version_id=?").bind(current.versionId).first<{total:number}>();
+      if (mode !== current.scoringMode && Number(configured?.total ?? 0)) throw new ApiError(409, "Mode hanya dapat diganti sebelum instrumen dibuat");
+      const caps = await binding.prepare("SELECT MAX(i.max_value) AS maximum,SUM(i.max_value) AS total FROM indicators i JOIN subcategories sc ON sc.id=i.subcategory_id JOIN categories c ON c.id=sc.category_id WHERE c.instrument_version_id=?").bind(current.versionId).first<{maximum:number;total:number}>();
+      if (Number(caps?.maximum ?? 0)>maxScore || (mode === "direct_points" && Number(configured?.total ?? 0)>0 && Number(caps?.total ?? 0)!==maxScore)) throw new ApiError(409, "Maksimum periode harus sesuai jumlah maksimum indikator");
       const duplicate = await binding.prepare("SELECT id FROM assessment_periods WHERE assessment_type_id = ? AND year = ? AND id <> ? LIMIT 1").bind(current.typeId, year, id).first();
       if (duplicate) throw new ApiError(409, "Jenis penilaian pada tahun tersebut sudah tersedia");
       const exceeding = await binding.prepare("SELECT MAX(COALESCE(sc.target_value,0)) AS targetMax, MAX(COALESCE(s.internal_value,0)) AS scoreMax FROM assessment_periods p LEFT JOIN categories c ON c.instrument_version_id=p.instrument_version_id LEFT JOIN subcategories sc ON sc.category_id=c.id LEFT JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.indicator_id=i.id AND s.period_id=p.id WHERE p.id=?").bind(id).first<{ targetMax: number; scoreMax: number }>();
       if (Number(exceeding?.targetMax ?? 0) > maxScore || Number(exceeding?.scoreMax ?? 0) > maxScore) throw new ApiError(409, "Nilai maksimal tidak boleh lebih kecil dari target atau nilai mandiri yang sudah tersimpan");
       await db.batch([
-        db.update(assessmentPeriods).set({ year, name, maxScore, startsAt, dueAt, status: status as "draft" | "open" | "review" | "finalized", updatedAt: now }).where(eq(assessmentPeriods.id, id)),
+        db.update(assessmentPeriods).set({ year, name, maxScore, scoringMode: mode, startsAt, dueAt, status: status as "draft" | "open" | "review" | "finalized", updatedAt: now }).where(eq(assessmentPeriods.id, id)),
         db.update(instrumentVersions).set({ name: `Instrumen ${current.code} ${year}`, updatedAt: now }).where(eq(instrumentVersions.id, current.versionId)),
       ]);
     } else if (body.resource === "category") {
@@ -189,9 +248,10 @@ export async function PATCH(request: Request) {
       if (targetValue > period.maxScore) throw new ApiError(400, `Target tidak boleh melebihi nilai maksimal periode (${period.maxScore})`);
       await db.update(subcategories).set({ code: String(body.code ?? "").trim().slice(0, 30), name: String(body.name ?? "").trim().slice(0, 180), weightPercent: Number(body.weight ?? 0), targetValue, sortOrder: Number(body.sortOrder ?? 0), updatedAt: now }).where(eq(subcategories.id, id));
     } else if (body.resource === "indicator") {
-      await db.update(indicators).set({ code: String(body.code ?? "").trim().slice(0, 30), name: String(body.name ?? "").trim().slice(0, 240), description: String(body.description ?? "").slice(0, 1000), weightPercent: Number(body.weight ?? 0), targetValue: null, sortOrder: Number(body.sortOrder ?? 0), updatedAt: now }).where(eq(indicators.id, id));
+      await db.update(indicators).set({ code: String(body.code ?? "").trim().slice(0, 30), name: String(body.name ?? "").trim().slice(0, 240), description: String(body.description ?? "").slice(0, 1000), weightPercent: Number(body.weight ?? 0), targetValue: null, ...await indicatorConfig(body, id), sortOrder: Number(body.sortOrder ?? 0), updatedAt: now }).where(eq(indicators.id, id));
     }
     else throw new ApiError(400, "Perubahan tidak valid");
+    await refreshPointContributions(structureVersion);
     await audit(request, actor, `${body.resource}.updated`, String(body.resource), id);
     return Response.json({ saved: true });
   } catch (error) { return apiError(error); }
@@ -204,6 +264,7 @@ export async function DELETE(request: Request) {
     const body = await request.json() as { resource?: string; id?: string };
     const resource = String(body.resource ?? "");
     const id = String(body.id ?? "");
+    const structureVersion = await assertMutableStructure(resource, body as Record<string, unknown>, id);
     if (!id) throw new ApiError(400, "ID wajib diisi");
     if (resource === "user" && id === actor.id) throw new ApiError(409, "Administrator yang sedang digunakan tidak dapat dihapus");
     const db = getDb();
@@ -264,6 +325,7 @@ export async function DELETE(request: Request) {
       ]);
     }
     else throw new ApiError(400, "Jenis data tidak dikenali");
+    await refreshPointContributions(structureVersion);
     await audit(request, actor, `${resource}.deleted`, resource, id);
     return Response.json({ deleted: true });
   } catch (error) {

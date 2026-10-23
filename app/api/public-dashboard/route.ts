@@ -1,7 +1,8 @@
 import { env } from "../../../server/runtime";
+import { readAssessment } from "../../../server/assessment-scoring";
 
 type Runtime = { DB: LocalDatabase };
-type PeriodRow = { id: string; typeId: string; typeCode: string; typeName: string; description: string; year: number; name: string; status: string; maxScore: number };
+type PeriodRow = { id: string; typeId: string; typeCode: string; typeName: string; description: string; year: number; name: string; status: string; maxScore: number; scoringMode: string };
 type ScoreRow = { periodId: string; categoryId: string; categoryCode: string; categoryName: string; categoryWeight: number; subcategoryId: string; subcategoryWeight: number; finalValue: number | null; targetValue: number | null; internalValue: number | null; assessorValue: number | null; indicatorId: string | null; scoreStatus: string | null; evidenceCount: number };
 
 function weighted(items: Array<{ value: number; weight: number }>) {
@@ -14,16 +15,21 @@ function weighted(items: Array<{ value: number; weight: number }>) {
 export async function GET() {
   const db = (env as unknown as Runtime).DB;
   const [periodResult, scoreResult] = await Promise.all([
-    db.prepare("SELECT p.id,p.assessment_type_id AS typeId,t.code AS typeCode,t.name AS typeName,t.description,p.year,p.name,p.status,p.max_score AS maxScore FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id WHERE t.active=1 AND t.is_public=1 AND p.status='finalized' ORDER BY t.code,p.year DESC").all<PeriodRow>(),
+    db.prepare("SELECT p.id,p.assessment_type_id AS typeId,t.code AS typeCode,t.name AS typeName,t.description,p.year,p.name,p.status,p.max_score AS maxScore,p.scoring_mode AS scoringMode FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id WHERE t.active=1 AND t.is_public=1 AND p.status='finalized' ORDER BY t.code,p.year DESC").all<PeriodRow>(),
     db.prepare("SELECT p.id AS periodId,c.id AS categoryId,c.code AS categoryCode,c.name AS categoryName,COALESCE(c.weight_percent,0) AS categoryWeight,sc.id AS subcategoryId,COALESCE(sc.weight_percent,0) AS subcategoryWeight,sc.final_value AS finalValue,sc.target_value AS targetValue,AVG(s.internal_value) AS internalValue,AVG(s.assessor_value) AS assessorValue,i.id AS indicatorId,MAX(s.status) AS scoreStatus,COUNT(DISTINCT el.evidence_id) AS evidenceCount FROM assessment_periods p JOIN assessment_types t ON t.id=p.assessment_type_id JOIN categories c ON c.instrument_version_id=p.instrument_version_id JOIN subcategories sc ON sc.category_id=c.id LEFT JOIN indicators i ON i.subcategory_id=sc.id LEFT JOIN indicator_scores s ON s.period_id=p.id AND s.indicator_id=i.id LEFT JOIN evidence_links el ON el.score_id=s.id LEFT JOIN evidence e ON e.id=el.evidence_id AND e.status='active' WHERE t.active=1 AND t.is_public=1 AND p.status='finalized' GROUP BY p.id,p.year,c.id,c.code,c.name,c.weight_percent,c.sort_order,sc.id,sc.weight_percent,sc.final_value,sc.target_value,sc.sort_order,i.id,i.sort_order ORDER BY p.year DESC,c.sort_order,sc.sort_order,i.sort_order").all<ScoreRow>(),
   ]);
   const periods = periodResult.results ?? [];
   const scoreRows = scoreResult.results ?? [];
   const typeIds = [...new Set(periods.map((period) => period.typeId))];
+  const direct = new Map();
+  for (const period of periods.filter(item => item.scoringMode === 'direct_points')) {
+    const summary = await readAssessment(period.id);
+    direct.set(period.id, { id: period.id, year: Number(period.year), name: period.name, status: period.status, maxScore: Number(period.maxScore), scoringMode: period.scoringMode, score: summary.final, scoreKind: 'final', totalIndicators: summary.total, evidencedIndicators: summary.rows.filter(row => Number(row.evidenceCount) > 0).length, categories: summary.categories.map(category => ({ ...category, code: summary.rows.find(row => row.categoryId === category.id)?.categoryCode, name: summary.rows.find(row => row.categoryId === category.id)?.categoryName })) });
+  }
   const assessments = typeIds.map((typeId) => {
     const typePeriods = periods.filter((period) => period.typeId === typeId);
     const latest = typePeriods[0];
-    const history = typePeriods.map((period) => summarize(period, scoreRows.filter((row) => row.periodId === period.id)));
+    const history = typePeriods.map((period) => direct.get(period.id) ?? summarize(period, scoreRows.filter((row) => row.periodId === period.id)));
     return { id: typeId, code: latest.typeCode, name: latest.typeName, description: latest.description, latest: history[0], history };
   });
   return Response.json({ assessments, updatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } });

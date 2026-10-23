@@ -161,7 +161,7 @@ test("pilihan multi-penilaian dimulai kosong dan input langsung dibatasi", async
     page,
     /Pilih jenis penilaian untuk menampilkan nilai subkategori/,
   );
-  assert.match(page, /Math\.min\(\s*periodMaxScore/);
+  assert.match(page, /Math\.min\(\s*indicatorMaxScore/);
   assert.match(css, /\.access-checks\{[^}]*text-align:left/);
 });
 

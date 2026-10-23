@@ -4,6 +4,18 @@ Aplikasi pengelolaan data dukung Pengadaan Barang/Jasa, pemantauan ITKP, dan pem
 
 Semua perubahan aktif tersedia pada branch `main`. Gunakan branch ini di Windows, Mac, dan VM; branch integrasi terdahulu sudah digabung.
 
+## Mode nilai dan ITKP 2026
+
+Tahun Penilaian menyediakan **Rata-rata berbobot** (mode bawaan untuk instrumen lama) dan **Poin langsung**. Pilih mode sebelum membuat struktur instrumen. Pada mode poin, setiap indikator wajib memiliki nilai maksimal; batas ini diperiksa oleh UI dan server. Nilai subkategori, kategori dan keseluruhan dijumlahkan, tanpa mengalikan bobot lagi. Kontribusi kategori/subkategori diperbarui dari jumlah maksimum indikatornya. Nilai yang belum diisi tidak menaikkan kontribusi indikator lain.
+
+ITKP 2026 mengikuti matriks yang diberikan: kategori maksimum 30/30/30/10; indikator maksimum 5; 2,5; 2,5; 10; 2,5; 2,5; 5; 15; 9; 6; 30; 10 (total 100). Ini adalah batas poin, bukan rumus konversi data sumber; nilai capaian tetap diisi berdasarkan matriks penilaian yang berlaku. Renaksi maksimal 6, kematangan UKPBJ maksimal 30. Target awal subkategori disetel sebesar maksimum poin, dan dapat disesuaikan admin sebagai target kerja.
+
+Admin memeriksa nilai dan bukti per indikator sebelum menyetujui. Finalisasi mode poin mengambil nilai indikator yang telah disetujui; subtotal final tidak diisi bebas. Seluruh indikator harus disetujui dan jumlah maksimum indikator harus sama dengan maksimum periode. Jika beberapa unit mengisi indikator yang sama, nilai antarunit dirata-rata per indikator dahulu, kemudian poin indikator dijumlahkan. Dashboard internal menampilkan nilai mandiri; dashboard publik menampilkan nilai final periode yang dipublikasikan. Laporan memisahkan keduanya.
+
+Migrasi baru diterapkan saat proses inisialisasi server. Setelah **backup database diverifikasi**, periode ITKP 2026 yang sudah dibuat dan masih kosong dapat disiapkan dengan `docker compose exec -T app node scripts/setup-itkp-2026.mjs --apply`. Script menolak struktur berbeda atau periode final; pengulangan yang sesuai tidak menghapus nilai. Data ITKP 2025 dan penilaian lain dipertahankan. Jangan menjalankan script untuk mereset periode berisi data.
+
+Verifikasi perhitungan: `npm run test:scoring`. Uji API dan kompatibilitas mode lama: `npm run test:scoring:integration` (memerlukan Docker MariaDB lokal, `.env`, akses root database dan port 3002 kosong). Pengujian integrasi membuat database sementara bernama `satunilai_scoring_test_*` dan menghapus database sementara itu setelah selesai; database aplikasi tidak dipakai sebagai data uji.
+
 ## Menjalankan dengan Docker Desktop
 
 Aktifkan Docker Desktop dengan Linux containers, kemudian jalankan dari direktori proyek:
